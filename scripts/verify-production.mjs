@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
+import { promisify } from "node:util";
 
-function runTest(name, fn) {
+async function runTest(name, fn) {
   try {
-    fn();
+    await fn();
     console.log(`[PASS] ${name}`);
   } catch (err) {
     console.error(`[FAIL] ${name}:`, err.message);
@@ -10,17 +11,19 @@ function runTest(name, fn) {
   }
 }
 
+const scryptAsync = promisify(crypto.scrypt);
+
 // 1. Test Password Hashing and Verification
-function hashPassword(password) {
+async function hashPassword(password) {
   if (!password || typeof password !== "string") {
     throw new Error("Password must be a valid non-empty string");
   }
   const salt = crypto.randomBytes(16).toString("hex");
-  const derivedKey = crypto.scryptSync(password, salt, 64);
+  const derivedKey = await scryptAsync(password, salt, 64);
   return `${salt}:${derivedKey.toString("hex")}`;
 }
 
-function verifyPassword(password, storedHash) {
+async function verifyPassword(password, storedHash) {
   if (!password || !storedHash || typeof password !== "string" || typeof storedHash !== "string") {
     return false;
   }
@@ -28,7 +31,7 @@ function verifyPassword(password, storedHash) {
     const [salt, key] = storedHash.split(":");
     if (!salt || !key) return false;
     const keyBuffer = Buffer.from(key, "hex");
-    const derivedKey = crypto.scryptSync(password, salt, 64);
+    const derivedKey = await scryptAsync(password, salt, 64);
     if (keyBuffer.length !== derivedKey.length) return false;
     return crypto.timingSafeEqual(keyBuffer, derivedKey);
   } catch {
@@ -36,28 +39,28 @@ function verifyPassword(password, storedHash) {
   }
 }
 
-runTest("Password hashing and valid verification", () => {
-  const hash = hashPassword("TestEngineering2026!");
-  if (!verifyPassword("TestEngineering2026!", hash)) {
+runTest("Password hashing and valid verification", async () => {
+  const hash = await hashPassword("TestEngineering2026!");
+  if (!(await verifyPassword("TestEngineering2026!", hash))) {
     throw new Error("Valid password failed verification");
   }
 });
 
-runTest("Password verification rejects wrong password", () => {
-  const hash = hashPassword("TestEngineering2026!");
-  if (verifyPassword("WrongPassword!", hash)) {
+runTest("Password verification rejects wrong password", async () => {
+  const hash = await hashPassword("TestEngineering2026!");
+  if (await verifyPassword("WrongPassword!", hash)) {
     throw new Error("Wrong password unexpectedly passed verification");
   }
 });
 
-runTest("Password verification rejects empty password and empty hash", () => {
-  if (verifyPassword("", "somesalt:somekey")) {
+runTest("Password verification rejects empty password and empty hash", async () => {
+  if (await verifyPassword("", "somesalt:somekey")) {
     throw new Error("Empty password bypassed verification");
   }
-  if (verifyPassword("ValidPass123", "")) {
+  if (await verifyPassword("ValidPass123", "")) {
     throw new Error("Empty hash bypassed verification");
   }
-  if (verifyPassword("ValidPass123", null)) {
+  if (await verifyPassword("ValidPass123", null)) {
     throw new Error("Null hash bypassed verification");
   }
 });

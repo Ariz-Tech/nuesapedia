@@ -49,6 +49,7 @@ const VIDEO_CATEGORIES = [
 ];
 
 const SEMESTERS = ["First Semester", "Second Semester"];
+const SESSIONS = ["2025/2026", "2024/2025", "2023/2024", "2022/2023", "2021/2022", "Older"];
 
 /**
  * Extract YouTube 11-char video ID from any valid YouTube URL format
@@ -96,6 +97,7 @@ export default function ResourceUploadPortal({
     userLevel && LEVELS.includes(userLevel) ? userLevel : "100L"
   );
   const [semester, setSemester] = useState(SEMESTERS[0]);
+  const [sessionYear, setSessionYear] = useState(SESSIONS[0]);
   const [type, setType] = useState(PDF_CATEGORIES[0]);
   const [description, setDescription] = useState("");
 
@@ -219,6 +221,7 @@ export default function ResourceUploadPortal({
             department,
             level,
             semester,
+            sessionYear,
             type,
             medium: "YOUTUBE",
             description: description.trim(),
@@ -248,6 +251,7 @@ export default function ResourceUploadPortal({
             department,
             level,
             semester,
+            sessionYear,
             type,
             medium: "PDF",
             description: description.trim(),
@@ -704,7 +708,7 @@ export default function ResourceUploadPortal({
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-2.5">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Level <span className="text-rose-500">*</span>
@@ -712,7 +716,7 @@ export default function ResourceUploadPortal({
               <select
                 value={level}
                 onChange={(e) => setLevel(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A]"
+                className="w-full px-2.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A]"
               >
                 {LEVELS.map((lvl) => (
                   <option key={lvl} value={lvl}>
@@ -729,11 +733,28 @@ export default function ResourceUploadPortal({
               <select
                 value={semester}
                 onChange={(e) => setSemester(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A]"
+                className="w-full px-2.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A]"
               >
                 {SEMESTERS.map((sem) => (
                   <option key={sem} value={sem}>
                     {sem}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Session
+              </label>
+              <select
+                value={sessionYear}
+                onChange={(e) => setSessionYear(e.target.value)}
+                className="w-full px-2.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A]"
+              >
+                {SESSIONS.map((sess) => (
+                  <option key={sess} value={sess}>
+                    {sess}
                   </option>
                 ))}
               </select>

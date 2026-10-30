@@ -1,5 +1,8 @@
 import crypto from "node:crypto";
+import { promisify } from "node:util";
 import { cookies } from "next/headers";
+
+const scryptAsync = promisify(crypto.scrypt);
 
 function getSessionSecret(): string {
   const secret = process.env.SESSION_SECRET;
@@ -25,21 +28,21 @@ export interface SessionPayload {
 }
 
 /**
- * Hash a password using scrypt with a unique random salt
+ * Hash a password using scrypt asynchronously with a unique random salt
  */
-export function hashPassword(password: string): string {
+export async function hashPassword(password: string): Promise<string> {
   if (!password || typeof password !== "string") {
     throw new Error("Password must be a valid non-empty string");
   }
   const salt = crypto.randomBytes(16).toString("hex");
-  const derivedKey = crypto.scryptSync(password, salt, 64);
+  const derivedKey = (await scryptAsync(password, salt, 64)) as Buffer;
   return `${salt}:${derivedKey.toString("hex")}`;
 }
 
 /**
- * Verify a plaintext password against the stored salt:hash string
+ * Verify a plaintext password asynchronously against the stored salt:hash string
  */
-export function verifyPassword(password: string, storedHash?: string | null): boolean {
+export async function verifyPassword(password: string, storedHash?: string | null): Promise<boolean> {
   if (!password || !storedHash || typeof password !== "string" || typeof storedHash !== "string") {
     return false;
   }
@@ -47,7 +50,7 @@ export function verifyPassword(password: string, storedHash?: string | null): bo
     const [salt, key] = storedHash.split(":");
     if (!salt || !key) return false;
     const keyBuffer = Buffer.from(key, "hex");
-    const derivedKey = crypto.scryptSync(password, salt, 64);
+    const derivedKey = (await scryptAsync(password, salt, 64)) as Buffer;
     if (keyBuffer.length !== derivedKey.length) return false;
     return crypto.timingSafeEqual(keyBuffer, derivedKey);
   } catch {
@@ -97,7 +100,11 @@ export function verifySessionToken(token: string): SessionPayload | null {
       .update(`${header}.${body}`)
       .digest("base64url");
 
-    if (signature !== expectedSignature) return null;
+    const sigBuf = Buffer.from(signature);
+    const expectedBuf = Buffer.from(expectedSignature);
+    if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+      return null;
+    }
 
     const payload: SessionPayload = JSON.parse(
       Buffer.from(body, "base64url").toString("utf8")
@@ -141,11 +148,14 @@ export async function getSession(): Promise<SessionPayload | null> {
   if (!session) return null;
 
   // Check if user email is declared in ADMIN_EMAILS
-  const adminEmails = (process.env.ADMIN_EMAILS || "admin@fuoye.edu.ng")
-    .split(",")
-    .map((e) => e.trim().toLowerCase());
-  if (adminEmails.includes(session.email.toLowerCase())) {
-    session.role = "ADMIN";
+  if (process.env.ADMIN_EMAILS) {
+    const adminEmails = process.env.ADMIN_EMAILS
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    if (adminEmails.includes(session.email.toLowerCase())) {
+      session.role = "ADMIN";
+    }
   }
 
   return session;

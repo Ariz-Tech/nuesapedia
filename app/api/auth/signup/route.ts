@@ -70,8 +70,8 @@ export async function POST(request: Request) {
     // Assign a random avatar if not specified or roll one
     const assignedAvatar = avatar || getRandomAvatar(cleanName);
 
-    // Hash password securely with scrypt
-    const hashedPassword = hashPassword(password);
+    // Hash password securely with asynchronous non-blocking scrypt
+    const hashedPassword = await hashPassword(password);
 
     // Create user in backend
     const newUser = await createUser({

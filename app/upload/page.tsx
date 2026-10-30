@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import PdfUploadPortal, { DbSubmission } from "@/components/PdfUploadPortal";
+import ResourceUploadPortal, { DbSubmission } from "@/components/ResourceUploadPortal";
 import { Loader2, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
@@ -65,7 +65,7 @@ export default function UploadPage() {
           </Link>
         </div>
 
-        <PdfUploadPortal
+        <ResourceUploadPortal
           userDepartment={user.department}
           userLevel={user.level}
           onSuccess={() => {

@@ -4,9 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BookOpen, Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { refresh: refreshAuth } = useAuth();
 
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [email, setEmail] = useState("");
@@ -52,6 +54,7 @@ export default function LoginPage() {
         throw new Error(data.error || "Login failed. Check your credentials.");
       }
 
+      await refreshAuth();
       router.push("/profile");
       router.refresh();
     } catch (err: unknown) {
@@ -61,9 +64,6 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
-
-
-
   if (checkingAuth) {
     return (
       <div className="min-h-screen bg-[#FAFAFA] flex flex-col items-center justify-center p-4">
@@ -82,7 +82,7 @@ export default function LoginPage() {
             <BookOpen className="w-5 h-5" />
           </div>
           <span className="text-2xl font-bold tracking-tight text-slate-900">
-            NuesaPedia
+            The NUESA Library
           </span>
         </Link>
         <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
@@ -100,8 +100,6 @@ export default function LoginPage() {
               {error}
             </div>
           )}
-
-
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Email */}
@@ -125,16 +123,12 @@ export default function LoginPage() {
                 <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
                   Password
                 </label>
-                <a
-                  href="#forgot"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert("Please contact the Faculty ICT desk to reset your faculty credentials.");
-                  }}
+                <Link
+                  href="/forgot-password"
                   className="text-xs text-[#00875A] hover:underline"
                 >
                   Forgot password?
-                </a>
+                </Link>
               </div>
               <div className="relative">
                 <input
@@ -168,7 +162,7 @@ export default function LoginPage() {
                   </>
                 ) : (
                   <>
-                    <span>Log in to NuesaPedia</span>
+                    <span>Log in to The NUESA Library</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}

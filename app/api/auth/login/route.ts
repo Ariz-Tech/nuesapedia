@@ -50,7 +50,8 @@ export async function POST(request: Request) {
     }
 
     // 2. Strict password verification (Never allow empty or unverified passwords)
-    if (!user.password || !verifyPassword(password, user.password)) {
+    const isPasswordValid = user.password ? await verifyPassword(password, user.password) : false;
+    if (!isPasswordValid) {
       return NextResponse.json(
         { success: false, error: "Invalid email or password." },
         { status: 401 }

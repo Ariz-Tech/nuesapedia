@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { FileText, ChevronRight, Play, BookOpen, Loader2 } from "lucide-react";
+import { FileText, ChevronRight, Play, BookOpen, Loader2, AlertCircle } from "lucide-react";
 
 interface ResourceItem {
   id: string;
@@ -71,17 +71,32 @@ function getDepartmentCover(dept: string) {
 export default function RecentResources() {
   const [resources, setResources] = useState<ResourceItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadResources = () => {
+    setLoading(true);
+    setError(null);
     fetch("/api/resources")
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (!res.ok) throw new Error("Could not load recent resources");
+        return res.json();
+      })
       .then((data) => {
         if (data?.success && Array.isArray(data.resources)) {
           setResources(data.resources.slice(0, 4));
+        } else {
+          setResources([]);
         }
       })
-      .catch((err) => console.error("Recent resources load error:", err))
+      .catch((err) => {
+        console.error("Recent resources load error:", err);
+        setError("Unable to load latest resources. Please check your connection.");
+      })
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadResources();
   }, []);
 
   return (
@@ -113,6 +128,21 @@ export default function RecentResources() {
             {[1, 2, 3, 4].map((i) => (
               <div key={i} className="bg-slate-50 border border-slate-200/80 rounded-2xl h-64 animate-pulse" />
             ))}
+          </div>
+        ) : error ? (
+          <div className="mt-8 p-8 text-center bg-rose-50/60 rounded-3xl border border-rose-200/80">
+            <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-2" />
+            <h3 className="text-base font-bold text-rose-900">Failed to Load Resources</h3>
+            <p className="text-xs text-rose-600 mt-1 max-w-md mx-auto">
+              {error}
+            </p>
+            <button
+              type="button"
+              onClick={loadResources}
+              className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 transition-colors cursor-pointer"
+            >
+              Try Again
+            </button>
           </div>
         ) : resources.length === 0 ? (
           <div className="mt-8 p-12 text-center bg-slate-50 rounded-3xl border border-slate-200/80">

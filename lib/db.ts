@@ -23,6 +23,17 @@ export interface DbSavedResource {
   type: string;
   fileSize: string;
   createdAt: string;
+  level?: string;
+  semester?: string;
+  sessionYear?: string;
+  medium?: "PDF" | "YOUTUBE";
+  description?: string;
+  fileUrl?: string;
+  fileName?: string;
+  youtubeUrl?: string;
+  youtubeVideoId?: string;
+  thumbnailUrl?: string;
+  downloads?: number;
 }
 
 export interface DbSubmission {
@@ -33,6 +44,7 @@ export interface DbSubmission {
   department: string;
   level: string;
   semester: string;
+  sessionYear?: string;
   type: string;
   medium: "PDF" | "YOUTUBE";
   description?: string;
@@ -48,6 +60,39 @@ export interface DbSubmission {
   rejectionReason?: string;
   reviewedAt?: string;
   reviewedBy?: string;
+  downloads?: number;
+  createdAt: string;
+}
+
+export interface DbReadingProgress {
+  userId: string;
+  resourceId: string;
+  percentage: number;
+  page: number;
+  updatedAt: string;
+}
+
+export interface DbMaterialRequest {
+  id: string;
+  userId?: string;
+  requesterName: string;
+  courseCode: string;
+  department: string;
+  level: string;
+  type: string;
+  details: string;
+  status: "OPEN" | "FULFILLED";
+  createdAt: string;
+}
+
+export interface DbResourceReport {
+  id: string;
+  resourceId: string;
+  resourceTitle: string;
+  courseCode: string;
+  reason: string;
+  details?: string;
+  status: "OPEN" | "RESOLVED";
   createdAt: string;
 }
 
@@ -59,6 +104,9 @@ export interface DbCourse extends CourseMetadata {
 const memoryUsers = new Map<string, DbUser>();
 const memorySavedResources: DbSavedResource[] = [];
 const memorySubmissions: DbSubmission[] = [];
+const memoryReadingProgress = new Map<string, DbReadingProgress>();
+const memoryMaterialRequests: DbMaterialRequest[] = [];
+const memoryResourceReports: DbResourceReport[] = [];
 
 // PostgreSQL connection pool
 let pool: Pool | null = null;
@@ -95,6 +143,8 @@ export async function initDb() {
   if (!db) {
     if (process.env.NODE_ENV === "production" && !process.env.DATABASE_URL) {
       console.error("CRITICAL PRODUCTION CONFIG: DATABASE_URL is not set. Data will not persist permanently across restarts!");
+    } else if (!process.env.DATABASE_URL) {
+      console.warn("NOTICE (DEV): DATABASE_URL is not set. Running in-memory database fallback (data resets on restart).");
     }
     return;
   }
@@ -158,6 +208,44 @@ export async function initDb() {
       CREATE INDEX IF NOT EXISTS idx_submissions_dept ON submissions(department);
       CREATE INDEX IF NOT EXISTS idx_submissions_course ON submissions(course_code);
       CREATE INDEX IF NOT EXISTS idx_saved_resources_user ON saved_resources(user_id);
+      CREATE INDEX IF NOT EXISTS idx_submissions_approved_filters ON submissions(status, department, level, medium, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_submissions_course_status ON submissions(course_code, status);
+
+      ALTER TABLE submissions ADD COLUMN IF NOT EXISTS downloads INT NOT NULL DEFAULT 0;
+      ALTER TABLE submissions ADD COLUMN IF NOT EXISTS session_year VARCHAR(30);
+
+      CREATE TABLE IF NOT EXISTS reading_progress (
+        user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
+        resource_id VARCHAR(255) NOT NULL,
+        percentage INT NOT NULL DEFAULT 0,
+        page INT NOT NULL DEFAULT 1,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, resource_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS material_requests (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255),
+        requester_name VARCHAR(255) NOT NULL DEFAULT 'Student',
+        course_code VARCHAR(100) NOT NULL,
+        department VARCHAR(255) NOT NULL,
+        level VARCHAR(50) NOT NULL DEFAULT '100L',
+        type VARCHAR(100) NOT NULL DEFAULT 'Past Question',
+        details TEXT,
+        status VARCHAR(50) NOT NULL DEFAULT 'OPEN',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS resource_reports (
+        id VARCHAR(255) PRIMARY KEY,
+        resource_id VARCHAR(255) NOT NULL,
+        resource_title VARCHAR(255) NOT NULL,
+        course_code VARCHAR(100) NOT NULL,
+        reason VARCHAR(255) NOT NULL,
+        details TEXT,
+        status VARCHAR(50) NOT NULL DEFAULT 'OPEN',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     isPostgresInitialized = true;
@@ -297,24 +385,94 @@ export async function updateUser(
 }
 
 /**
- * Get user saved resources
+ * Update user password hash (for Change Password & Forgot Password Reset)
  */
-export async function getSavedResources(userId: string): Promise<DbSavedResource[]> {
+export async function updateUserPassword(userId: string, hashedPassword: string): Promise<boolean> {
+  await initDb();
+  const existing = await findUserById(userId);
+  if (!existing) return false;
+
   const db = getPool();
   if (db && isPostgresInitialized) {
     try {
-      const res = await db.query(
-        `SELECT id, user_id as "userId", resource_id as "resourceId", title, course_code as "courseCode", department, type, file_size as "fileSize", created_at as "createdAt"
-         FROM saved_resources WHERE user_id = $1 ORDER BY created_at DESC`,
-        [userId]
+      await db.query(
+        `UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2`,
+        [hashedPassword, userId]
       );
-      if (res.rows.length > 0) return res.rows;
     } catch {
       // Fallback
     }
   }
 
-  return memorySavedResources.filter((r) => r.userId === userId);
+  existing.password = hashedPassword;
+  memoryUsers.set(existing.email.toLowerCase(), existing);
+  return true;
+}
+
+/**
+ * Get user saved resources enriched with full submission metadata (medium, fileUrl, video fields)
+ */
+export async function getSavedResources(userId: string): Promise<DbSavedResource[]> {
+  await initDb();
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      const res = await db.query(
+        `SELECT sr.id,
+                sr.user_id as "userId",
+                sr.resource_id as "resourceId",
+                COALESCE(s.title, sr.title) as title,
+                COALESCE(s.course_code, sr.course_code) as "courseCode",
+                COALESCE(s.department, sr.department) as department,
+                COALESCE(s.type, sr.type) as type,
+                COALESCE(s.file_size, sr.file_size) as "fileSize",
+                sr.created_at as "createdAt",
+                s.level,
+                s.semester,
+                s.session_year as "sessionYear",
+                s.medium,
+                s.description,
+                s.file_url as "fileUrl",
+                s.file_name as "fileName",
+                s.youtube_url as "youtubeUrl",
+                s.youtube_video_id as "youtubeVideoId",
+                s.thumbnail_url as "thumbnailUrl",
+                COALESCE(s.downloads, 0) as downloads
+         FROM saved_resources sr
+         LEFT JOIN submissions s ON s.id = sr.resource_id
+         WHERE sr.user_id = $1
+         ORDER BY sr.created_at DESC`,
+        [userId]
+      );
+      return res.rows;
+    } catch {
+      // Fallback
+    }
+  }
+
+  return memorySavedResources
+    .filter((r) => r.userId === userId)
+    .map((r) => {
+      const sub = memorySubmissions.find((s) => s.id === r.resourceId);
+      if (!sub) return r;
+      return {
+        ...r,
+        title: sub.title || r.title,
+        courseCode: sub.courseCode || r.courseCode,
+        department: sub.department || r.department,
+        type: sub.type || r.type,
+        fileSize: sub.fileSize || r.fileSize,
+        level: sub.level,
+        semester: sub.semester,
+        medium: sub.medium,
+        description: sub.description,
+        fileUrl: sub.fileUrl,
+        fileName: sub.fileName,
+        youtubeUrl: sub.youtubeUrl,
+        youtubeVideoId: sub.youtubeVideoId,
+        thumbnailUrl: sub.thumbnailUrl,
+      };
+    });
 }
 
 /**
@@ -356,11 +514,13 @@ export async function addSavedResource(data: {
     }
   }
 
-  const existingIdx = memorySavedResources.findIndex(
-    (r) => r.userId === item.userId && r.resourceId === item.resourceId
-  );
-  if (existingIdx === -1) {
-    memorySavedResources.unshift(item);
+  if (!isPostgresInitialized) {
+    const existingIdx = memorySavedResources.findIndex(
+      (r) => r.userId === item.userId && r.resourceId === item.resourceId
+    );
+    if (existingIdx === -1) {
+      memorySavedResources.unshift(item);
+    }
   }
 
   return item;
@@ -423,6 +583,7 @@ export async function createSubmission(data: {
   department: string;
   level: string;
   semester?: string;
+  sessionYear?: string;
   type?: string;
   medium?: "PDF" | "YOUTUBE";
   description?: string;
@@ -446,6 +607,7 @@ export async function createSubmission(data: {
     department: data.department,
     level: data.level,
     semester: data.semester || "First Semester",
+    sessionYear: data.sessionYear || undefined,
     type: data.type || (medium === "YOUTUBE" ? "Video Tutorial" : "Lecture Note"),
     medium,
     description: data.description || "",
@@ -458,6 +620,7 @@ export async function createSubmission(data: {
     youtubeVideoId: data.youtubeVideoId,
     thumbnailUrl: data.thumbnailUrl,
     status: data.status || "PENDING_REVIEW",
+    downloads: 0,
     createdAt: new Date().toISOString(),
   };
 
@@ -465,8 +628,8 @@ export async function createSubmission(data: {
   if (db && isPostgresInitialized) {
     try {
       await db.query(
-        `INSERT INTO submissions (id, user_id, title, course_code, department, level, semester, type, medium, description, file_url, file_name, file_size, r2_key, cloudinary_public_id, youtube_url, youtube_video_id, thumbnail_url, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+        `INSERT INTO submissions (id, user_id, title, course_code, department, level, semester, session_year, type, medium, description, file_url, file_name, file_size, r2_key, cloudinary_public_id, youtube_url, youtube_video_id, thumbnail_url, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
         [
           item.id,
           item.userId,
@@ -475,6 +638,7 @@ export async function createSubmission(data: {
           item.department,
           item.level,
           item.semester,
+          item.sessionYear || null,
           item.type,
           item.medium,
           item.description,
@@ -494,7 +658,9 @@ export async function createSubmission(data: {
     }
   }
 
-  memorySubmissions.unshift(item);
+  if (!isPostgresInitialized) {
+    memorySubmissions.unshift(item);
+  }
   return item;
 }
 
@@ -531,6 +697,7 @@ export async function getSubmissionById(submissionId: string): Promise<DbSubmiss
     try {
       const res = await db.query(
         `SELECT id, user_id as "userId", title, course_code as "courseCode", department, level, semester,
+                session_year as "sessionYear", COALESCE(downloads, 0) as downloads,
                 type, medium, description, file_url as "fileUrl", file_name as "fileName", file_size as "fileSize",
                 r2_key as "r2Key", cloudinary_public_id as "cloudinaryPublicId", youtube_url as "youtubeUrl",
                 youtube_video_id as "youtubeVideoId", thumbnail_url as "thumbnailUrl", status,
@@ -752,12 +919,50 @@ export async function updateUserRole(userId: string, role: string): Promise<DbUs
 }
 
 /**
- * Retrieve verified courses that exist in the database and have approved submissions.
+ * Retrieve verified courses with SQL aggregation (O(1) in DB) rather than scanning all rows in JS.
  */
 export async function getApprovedCourses(): Promise<DbCourse[]> {
   await initDb();
-  const approvedSubmissions = await getAllSubmissions("APPROVED");
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      const res = await db.query(`
+        SELECT 
+          course_code as "code",
+          MAX(department) as "department",
+          MAX(level) as "level",
+          MAX(semester) as "semester",
+          MAX(title) as "latestTitle",
+          MAX(description) as "latestDescription",
+          COUNT(*)::int as "resourceCount"
+        FROM submissions
+        WHERE status = 'APPROVED'
+        GROUP BY course_code
+        ORDER BY course_code ASC
+      `);
 
+      if (res.rows.length > 0) {
+        return res.rows.map((row) => {
+          const meta = resolveCourseMetadata(row.code, {
+            title: row.latestTitle,
+            department: row.department,
+            level: row.level,
+            semester: row.semester,
+            description: row.latestDescription,
+          });
+          return {
+            ...meta,
+            resourceCount: row.resourceCount || 0,
+          };
+        });
+      }
+    } catch (err) {
+      console.warn("SQL getApprovedCourses error, falling back:", err);
+    }
+  }
+
+  // In-memory fallback
+  const approvedSubmissions = memorySubmissions.filter((s) => s.status === "APPROVED");
   const courseMap = new Map<
     string,
     {
@@ -794,6 +999,476 @@ export async function getApprovedCourses(): Promise<DbCourse[]> {
   }
 
   return courses.sort((a, b) => a.code.localeCompare(b.code));
+}
+
+export interface GetResourcesOptions {
+  department?: string | null;
+  level?: string | null;
+  semester?: string | null;
+  medium?: string | null;
+  category?: string | null;
+  query?: string | null;
+  page?: number;
+  limit?: number;
+}
+
+export interface PaginatedResourcesResult {
+  resources: DbSubmission[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+/**
+ * Fetch approved materials with SQL filtering, indexing, and pagination
+ */
+export async function getApprovedResourcesPaginated(
+  options: GetResourcesOptions = {}
+): Promise<PaginatedResourcesResult> {
+  await initDb();
+  const page = Math.max(1, Number(options.page) || 1);
+  const limit = Math.min(1000, Math.max(1, Number(options.limit) || 500));
+  const offset = (page - 1) * limit;
+
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      const conditions: string[] = ["status = 'APPROVED'"];
+      const params: unknown[] = [];
+      let i = 1;
+
+      if (options.department && options.department !== "All" && options.department !== "All Departments") {
+        conditions.push(`LOWER(department) = LOWER($${i++})`);
+        params.push(options.department);
+      }
+      if (options.level && options.level !== "All" && options.level !== "All Levels") {
+        conditions.push(`level = $${i++}`);
+        params.push(options.level);
+      }
+      if (options.semester && options.semester !== "All" && options.semester !== "All Semesters") {
+        conditions.push(`LOWER(semester) = LOWER($${i++})`);
+        params.push(options.semester);
+      }
+      if (options.medium && options.medium !== "All" && options.medium !== "ALL") {
+        conditions.push(`medium = $${i++}`);
+        params.push(options.medium.toUpperCase());
+      }
+      if (options.category && options.category !== "All" && options.category !== "All Categories") {
+        conditions.push(`LOWER(type) LIKE LOWER($${i++})`);
+        params.push(`%${options.category}%`);
+      }
+      if (options.query && options.query.trim()) {
+        const q = `%${options.query.trim().toLowerCase()}%`;
+        conditions.push(`(LOWER(title) LIKE $${i} OR LOWER(course_code) LIKE $${i} OR LOWER(description) LIKE $${i})`);
+        params.push(q);
+        i++;
+      }
+
+      const whereClause = conditions.join(" AND ");
+
+      const countRes = await db.query(
+        `SELECT COUNT(*)::int as total FROM submissions WHERE ${whereClause}`,
+        params
+      );
+      const total = countRes.rows[0]?.total || 0;
+
+      const dataParams = [...params, limit, offset];
+      const dataRes = await db.query(
+        `SELECT id, user_id as "userId", title, course_code as "courseCode", department, level, semester,
+                session_year as "sessionYear", COALESCE(downloads, 0) as downloads,
+                type, medium, description, file_url as "fileUrl", file_name as "fileName", file_size as "fileSize",
+                cloudinary_public_id as "cloudinaryPublicId", youtube_url as "youtubeUrl", youtube_video_id as "youtubeVideoId",
+                thumbnail_url as "thumbnailUrl", status, created_at as "createdAt"
+         FROM submissions
+         WHERE ${whereClause}
+         ORDER BY created_at DESC
+         LIMIT $${i++} OFFSET $${i++}`,
+        dataParams
+      );
+
+      return {
+        resources: dataRes.rows,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1,
+      };
+    } catch (err) {
+      console.warn("SQL getApprovedResourcesPaginated error, falling back:", err);
+    }
+  }
+
+  // In-memory fallback
+  const allApproved = memorySubmissions.filter((s) => s.status === "APPROVED");
+  const filtered = allApproved.filter((res) => {
+    if (options.department && options.department !== "All" && options.department !== "All Departments") {
+      if (res.department.toLowerCase() !== options.department.toLowerCase()) return false;
+    }
+    if (options.level && options.level !== "All" && options.level !== "All Levels") {
+      if (res.level !== options.level) return false;
+    }
+    if (options.semester && options.semester !== "All" && options.semester !== "All Semesters") {
+      if ((res.semester || "").toLowerCase() !== options.semester.toLowerCase()) return false;
+    }
+    if (options.medium && options.medium !== "All" && options.medium !== "ALL") {
+      if (res.medium !== options.medium.toUpperCase()) return false;
+    }
+    if (options.category && options.category !== "All" && options.category !== "All Categories") {
+      if (!res.type.toLowerCase().includes(options.category.toLowerCase())) return false;
+    }
+    if (options.query && options.query.trim()) {
+      const q = options.query.trim().toLowerCase();
+      const mTitle = res.title.toLowerCase().includes(q);
+      const mCode = res.courseCode.toLowerCase().includes(q);
+      const mDesc = (res.description || "").toLowerCase().includes(q);
+      if (!mTitle && !mCode && !mDesc) return false;
+    }
+    return true;
+  });
+
+  const total = filtered.length;
+  const paginated = filtered.slice(offset, offset + limit);
+
+  return {
+    resources: paginated,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit) || 1,
+  };
+}
+
+/**
+ * Student Material Requests (for missing textbooks, past questions, or handouts)
+ */
+export async function createMaterialRequest(data: {
+  userId?: string;
+  requesterName?: string;
+  courseCode: string;
+  department: string;
+  level: string;
+  type: string;
+  details?: string;
+}): Promise<DbMaterialRequest> {
+  await initDb();
+  const id = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const item: DbMaterialRequest = {
+    id,
+    userId: data.userId,
+    requesterName: (data.requesterName || "Engineering Student").trim(),
+    courseCode: data.courseCode.trim().toUpperCase(),
+    department: data.department.trim(),
+    level: data.level.trim() || "100L",
+    type: data.type.trim() || "Past Question",
+    details: (data.details || "").trim(),
+    status: "OPEN",
+    createdAt: new Date().toISOString(),
+  };
+
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      await db.query(
+        `INSERT INTO material_requests (id, user_id, requester_name, course_code, department, level, type, details, status, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          item.id,
+          item.userId || null,
+          item.requesterName,
+          item.courseCode,
+          item.department,
+          item.level,
+          item.type,
+          item.details,
+          item.status,
+          item.createdAt,
+        ]
+      );
+      return item;
+    } catch {
+      // Fallback
+    }
+  }
+
+  memoryMaterialRequests.unshift(item);
+  return item;
+}
+
+export async function getMaterialRequests(status?: string): Promise<DbMaterialRequest[]> {
+  await initDb();
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      let query = `
+        SELECT id, user_id as "userId", requester_name as "requesterName",
+               course_code as "courseCode", department, level, type, details,
+               status, created_at as "createdAt"
+        FROM material_requests
+      `;
+      const params: unknown[] = [];
+      if (status && status !== "ALL") {
+        query += ` WHERE status = $1`;
+        params.push(status);
+      }
+      query += ` ORDER BY created_at DESC`;
+      const res = await db.query(query, params);
+      return res.rows;
+    } catch {
+      // Fallback
+    }
+  }
+
+  if (status && status !== "ALL") {
+    return memoryMaterialRequests.filter((r) => r.status === status);
+  }
+  return [...memoryMaterialRequests];
+}
+
+export async function updateMaterialRequestStatus(
+  id: string,
+  status: "OPEN" | "FULFILLED"
+): Promise<DbMaterialRequest | null> {
+  await initDb();
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      const res = await db.query(
+        `UPDATE material_requests
+         SET status = $1
+         WHERE id = $2
+         RETURNING id, user_id as "userId", requester_name as "requesterName",
+                   course_code as "courseCode", department, level, type, details,
+                   status, created_at as "createdAt"`,
+        [status, id]
+      );
+      if (res.rows.length > 0) return res.rows[0];
+    } catch {
+      // Fallback
+    }
+  }
+
+  const found = memoryMaterialRequests.find((r) => r.id === id);
+  if (!found) return null;
+  found.status = status;
+  return found;
+}
+
+/**
+ * Resource Issue Reports (broken PDF, wrong course code, illegible scan)
+ */
+export async function createResourceReport(data: {
+  resourceId: string;
+  resourceTitle: string;
+  courseCode: string;
+  reason: string;
+  details?: string;
+}): Promise<DbResourceReport> {
+  await initDb();
+  const id = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const item: DbResourceReport = {
+    id,
+    resourceId: data.resourceId,
+    resourceTitle: data.resourceTitle.trim(),
+    courseCode: data.courseCode.trim().toUpperCase(),
+    reason: data.reason.trim(),
+    details: (data.details || "").trim(),
+    status: "OPEN",
+    createdAt: new Date().toISOString(),
+  };
+
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      await db.query(
+        `INSERT INTO resource_reports (id, resource_id, resource_title, course_code, reason, details, status, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          item.id,
+          item.resourceId,
+          item.resourceTitle,
+          item.courseCode,
+          item.reason,
+          item.details || null,
+          item.status,
+          item.createdAt,
+        ]
+      );
+      return item;
+    } catch {
+      // Fallback
+    }
+  }
+
+  memoryResourceReports.unshift(item);
+  return item;
+}
+
+export async function getResourceReports(status?: string): Promise<DbResourceReport[]> {
+  await initDb();
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      let query = `
+        SELECT id, resource_id as "resourceId", resource_title as "resourceTitle",
+               course_code as "courseCode", reason, details, status, created_at as "createdAt"
+        FROM resource_reports
+      `;
+      const params: unknown[] = [];
+      if (status && status !== "ALL") {
+        query += ` WHERE status = $1`;
+        params.push(status);
+      }
+      query += ` ORDER BY created_at DESC`;
+      const res = await db.query(query, params);
+      return res.rows;
+    } catch {
+      // Fallback
+    }
+  }
+
+  if (status && status !== "ALL") {
+    return memoryResourceReports.filter((r) => r.status === status);
+  }
+  return [...memoryResourceReports];
+}
+
+export async function resolveResourceReport(id: string): Promise<boolean> {
+  await initDb();
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      const res = await db.query(
+        `UPDATE resource_reports SET status = 'RESOLVED' WHERE id = $1`,
+        [id]
+      );
+      if ((res.rowCount || 0) > 0) return true;
+    } catch {
+      // Fallback
+    }
+  }
+
+  const found = memoryResourceReports.find((r) => r.id === id);
+  if (!found) return false;
+  found.status = "RESOLVED";
+  return true;
+}
+
+/**
+ * Increment download counter for a resource submission
+ */
+export async function incrementResourceDownload(resourceId: string): Promise<number> {
+  await initDb();
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      const res = await db.query(
+        `UPDATE submissions
+         SET downloads = COALESCE(downloads, 0) + 1
+         WHERE id = $1
+         RETURNING downloads`,
+        [resourceId]
+      );
+      if (res.rows.length > 0) {
+        return Number(res.rows[0].downloads) || 1;
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
+  const item = memorySubmissions.find((s) => s.id === resourceId);
+  if (item) {
+    item.downloads = (item.downloads || 0) + 1;
+    return item.downloads;
+  }
+  return 0;
+}
+
+/**
+ * Upsert reading progress for an authenticated user
+ */
+export async function upsertReadingProgress(
+  userId: string,
+  resourceId: string,
+  percentage: number,
+  page = 1
+): Promise<DbReadingProgress> {
+  await initDb();
+  const clampedPct = Math.max(0, Math.min(100, Math.round(percentage)));
+  const clampedPage = Math.max(1, Math.round(page));
+  const updatedAt = new Date().toISOString();
+
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      await db.query(
+        `INSERT INTO reading_progress (user_id, resource_id, percentage, page, updated_at)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (user_id, resource_id)
+         DO UPDATE SET percentage = EXCLUDED.percentage, page = EXCLUDED.page, updated_at = EXCLUDED.updated_at`,
+        [userId, resourceId, clampedPct, clampedPage, updatedAt]
+      );
+    } catch {
+      // Fallback
+    }
+  }
+
+  const record: DbReadingProgress = {
+    userId,
+    resourceId,
+    percentage: clampedPct,
+    page: clampedPage,
+    updatedAt,
+  };
+  memoryReadingProgress.set(`${userId}:${resourceId}`, record);
+  return record;
+}
+
+/**
+ * Retrieve reading progress for an authenticated user
+ */
+export async function getUserReadingProgress(
+  userId: string,
+  resourceId: string
+): Promise<DbReadingProgress | null> {
+  await initDb();
+  const db = getPool();
+  if (db && isPostgresInitialized) {
+    try {
+      const res = await db.query(
+        `SELECT user_id as "userId", resource_id as "resourceId", percentage, page, updated_at as "updatedAt"
+         FROM reading_progress
+         WHERE user_id = $1 AND resource_id = $2
+         LIMIT 1`,
+        [userId, resourceId]
+      );
+      if (res.rows.length > 0) return res.rows[0];
+    } catch {
+      // Fallback
+    }
+  }
+
+  return memoryReadingProgress.get(`${userId}:${resourceId}`) || null;
+}
+
+/**
+ * Health check helper for GET /api/health
+ */
+export async function checkDatabaseHealth(): Promise<{
+  connected: boolean;
+  mode: "postgresql" | "memory";
+}> {
+  const db = getPool();
+  if (db) {
+    try {
+      await db.query("SELECT 1");
+      return { connected: true, mode: "postgresql" };
+    } catch {
+      return { connected: false, mode: "memory" };
+    }
+  }
+  return { connected: true, mode: "memory" };
 }
 
 

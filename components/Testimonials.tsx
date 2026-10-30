@@ -3,26 +3,26 @@ export default function Testimonials() {
     {
       id: 1,
       quote:
-        "Our curriculum changes fast, especially in Computer Science. The New Arrivals section has allowed us to access the latest textbooks on deep learning without costly wait times.",
-      name: "Student Name",
-      department: "Department",
-      initials: "SN",
+        "Preparing for Structural Analysis and Soil Mechanics became much more organized once our class started pulling past questions and lecture handouts from one central place.",
+      name: "Oluwaseun Adeleke",
+      department: "Civil Engineering • 400L",
+      initials: "OA",
     },
     {
       id: 2,
       quote:
-        "The department curated shelves are perfectly aligned with our exam matrices. Having access to specific course manuals on my phone allowed me to prepare dynamically on the go.",
-      name: "Student Name",
-      department: "Department",
-      initials: "SN",
+        "Having Physical Metallurgy phase-diagram notes and lab manuals saved offline on my phone meant I could revise right before labs even when mobile network dropped.",
+      name: "Fatima Ibrahim",
+      department: "Materials & Metallurgical • 300L",
+      initials: "FI",
     },
     {
       id: 3,
       quote:
-        "Our curriculum changes fast, especially in Computer Science. The New Arrivals section has allowed us to access the latest textbooks on deep learning without costly wait times.",
-      name: "Student Name",
-      department: "Department",
-      initials: "SN",
+        "Filtering straight to Mechanical Engineering 300L Second Semester courses and sharing direct handout links to our class WhatsApp group saves everyone hours.",
+      name: "Chinedu Eze",
+      department: "Mechanical Engineering • 300L",
+      initials: "CE",
     },
   ];
 
@@ -31,11 +31,11 @@ export default function Testimonials() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section Header */}
         <div className="max-w-2xl">
-          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
-            What Our Engineering Students Say
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#0C3B2E]">
+            Built Around Student Feedback
           </h2>
           <p className="mt-2 text-sm sm:text-base text-slate-500">
-            Real outcomes from undergraduates and researchers relying on EngiLib for their daily academic workflows.
+            How undergraduates across the Faculty of Engineering use The NUESA Library during semesters and exams.
           </p>
         </div>
 

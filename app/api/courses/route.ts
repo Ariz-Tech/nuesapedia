@@ -56,11 +56,18 @@ export async function GET(request: Request) {
       return true;
     });
 
-    return NextResponse.json({
-      success: true,
-      courses: filtered,
-      count: filtered.length,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        courses: filtered,
+        count: filtered.length,
+      },
+      {
+        headers: {
+          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+        },
+      }
+    );
   } catch (error) {
     console.error("Failed to fetch verified courses:", error);
     return NextResponse.json(

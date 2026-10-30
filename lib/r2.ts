@@ -99,6 +99,55 @@ export async function getFileUrl(
 }
 
 /**
+ * Generate a pre-signed GET URL that forces browser file download (Content-Disposition: attachment)
+ */
+export async function getSignedDownloadUrl(
+  key: string,
+  filename: string,
+  expiresInSeconds: number = 900
+): Promise<string> {
+  if (isR2Configured()) {
+    const client = getR2Client();
+    const safeName = filename.replace(/["\r\n]/g, "_");
+    const command = new GetObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
+      ResponseContentDisposition: `attachment; filename="${safeName}"`,
+    });
+    return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+  }
+
+  if (R2_PUBLIC_URL) {
+    const cleanBase = R2_PUBLIC_URL.replace(/\/$/, "");
+    const cleanKey = key.replace(/^\//, "");
+    return `${cleanBase}/${cleanKey}`;
+  }
+
+  return "";
+}
+
+/**
+ * Generate a pre-signed inline GET URL for in-browser reading/viewing (Content-Disposition: inline)
+ */
+export async function getSignedViewUrl(
+  key: string,
+  expiresInSeconds: number = 900
+): Promise<string> {
+  if (isR2Configured()) {
+    const client = getR2Client();
+    const command = new GetObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
+      ResponseContentDisposition: "inline",
+      ResponseContentType: "application/pdf",
+    });
+    return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+  }
+
+  return getFileUrl(key, expiresInSeconds);
+}
+
+/**
  * Delete an object from Cloudflare R2 storage
  */
 export async function deleteR2Object(key: string): Promise<void> {

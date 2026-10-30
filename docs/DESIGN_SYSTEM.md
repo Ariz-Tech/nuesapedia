@@ -1,16 +1,16 @@
-# NuesaPedia — Design System Specification
+# The NUESA Library — Design System Specification
 
-**Project:** NuesaPedia (Digital Faculty Library)  
-**Version:** 2.0 (Updated to match Visual Mockup Design Language)  
+**Project:** The NUESA Library (Digital Faculty Library)  
+**Version:** 2.1 (Updated for Simplified Navigation & Offline PWA Vault)  
 **Target Audience:** Engineering Undergraduates, Faculty Members, & Academic Researchers  
 **Faculty:** Faculty of Engineering (FUOYE / NUESA)  
-**Implementation Stack:** Next.js 16 (App Router) + Tailwind CSS v4 + Lucide React + Plus Jakarta Sans  
+**Implementation Stack:** Next.js 16 (App Router) + Tailwind CSS v4 + Lucide React + Plus Jakarta Sans + Geist  
 
 ---
 
 # 1. Design Principles & Brand Identity
 
-NuesaPedia is an academic study vault and digital library tailored specifically for engineering students. The visual language balances **academic authority**, **clean clarity**, and **modern engineering precision**.
+The NUESA Library is an academic study vault and digital library tailored specifically for engineering students. The visual language balances **academic authority**, **clean clarity**, and **modern engineering precision**.
 
 ### 1. High Information Scent & Zero Friction
 * Academic workflows demand instant answers. Materials (lecture slides, reference textbooks, past question solutions, video tutorials, and lab manuals) must be discoverable in seconds without mandatory login barriers.
@@ -159,20 +159,19 @@ Used across `/departments/[slug]`, `/resources`, and `/saved`.
 
 | Route | Page Name | Primary Purpose | Key Features |
 |---|---|---|---|
-| `/` | Landing Home | High-level platform intro & quick search | Hero search, feature cards, department carousel, recent resources, FAQ |
-| `/departments` | Choose / Browse Department | Comprehensive directory of all 8 engineering departments | Back button, search filter, responsive 3-column department cards grid |
-| `/departments/[slug]` | Department Level Vault | Department-specific study materials & level breakdown | Back button, dynamic level switcher (100L-500L), type filter pills, 3-column resource cards |
-| `/resources` | Global Resource Vault | Cross-department search and multi-facet filtering | Text search, department select, level chips, material type filters, resource cards |
-| `/saved` | Saved Resources | Personal study vault of bookmarked materials | Persistent client-side bookmarks, solid black bookmark glyphs, filter by type, empty state |
+| `/` | Landing Home | High-level platform intro & quick search | Hero search, department cards (routing to `/resources`), value proposition, testimonials, FAQ |
+| `/resources` | Global Resource Vault | Unified course materials directory & offline vault | Navbar course search, department/level/course/format/category filters, Read, Watch, Bookmark, & Offline Download |
+| `/resources/[id]` | Resource Reader | Dedicated document reader & lecture player | In-browser PDF reader (online & IndexedDB offline blob), YouTube player, reading progress sync |
+| `/saved` | Saved & Offline Vault | Personal study shelf of bookmarked & downloaded materials | Persistent bookmarks (cloud + localStorage) & IndexedDB downloaded PDFs readable 100% offline |
 
 ---
 
-# 6. Saved Resources & State Management
+# 6. Saved Resources & Offline State Management
 
-* **Storage Mechanism:** Client-side `localStorage` under key `nuesapedia_saved_resource_ids`.
+* **Bookmark Storage:** Server `/api/saved` (when authenticated) synced with `localStorage` (`nuesapedia_saved_materials_v1` for instant guest & offline access).
+* **Offline Document Storage:** Browser IndexedDB (`nuesapedia_offline_db` via `lib/offline-vault.ts`) storing full PDF `Blob` binaries in `downloads`, catalog metadata in `resources`, and progress in `reading`.
 * **Reactive Provider:** `SavedResourcesProvider` (`context/SavedResourcesContext.tsx`) provides:
-  * `savedIds`: Array of bookmarked IDs.
-  * `isSaved(id: string)`: Fast membership check.
-  * `toggleSave(id: string)`: Toggles resource bookmark with automatic persistence.
-  * `savedCount`: Real-time counter displayed in the global `Navbar` header.
-* **Seed Data:** Default bookmarked collection includes the 6 resources shown in the design mockup (`MEG 201`, `CVE 305`, `EEE 301`, `CPE 202`, `MCE 401`, `GST 111`).
+  * `savedItems` / `savedIds`: Bookmarked course materials.
+  * `isSaved(id: string)` & `toggleSave(item)`: Instant bookmark toggle with persistence.
+  * `savedCount` & `offlineCount`: Real-time counters displayed in the global `Navbar` header and filter pills.
+  * `downloadMaterial(item)`: Downloads PDF to the user's device while caching the binary `Blob` in IndexedDB for offline reading.

@@ -188,7 +188,7 @@ export default function BrowseDepartments() {
               {/* Action Link */}
               <div className="px-5 pb-5 pt-1">
                 <Link
-                  href={`/departments/${dept.slug}`}
+                  href={`/resources?dept=${encodeURIComponent(dept.slug)}`}
                   className="flex items-center justify-between text-xs sm:text-sm font-medium text-slate-800 hover:text-[#00875A] transition-colors border-t border-slate-100 pt-3 group/link"
                 >
                   <span>View Resources</span>

@@ -4,9 +4,15 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import PdfUploadPortal, { DbSubmission } from "@/components/PdfUploadPortal";
+import type { DbSubmission } from "@/components/ResourceUploadPortal";
+import { useAuth } from "@/context/AuthContext";
+import { useSavedResources } from "@/context/SavedResourcesContext";
+import { DEPARTMENTS } from "@/lib/departments";
+import { getRandomAvatar } from "@/lib/avatars";
+import { formatBytes } from "@/lib/offline-vault";
 import {
   Bookmark,
   Building2,
@@ -19,15 +25,30 @@ import {
   Trash2,
   UserCheck,
   Loader2,
-  ExternalLink,
   UploadCloud,
   FileCheck2,
   Clock,
   Eye,
   PlusCircle,
   Play,
+  Check,
+  X,
+  Settings,
+  Lock,
+  HardDriveDownload,
+  AlertCircle,
+  CheckCircle2,
+  ArrowRight,
 } from "lucide-react";
-import { getRandomAvatar } from "@/lib/avatars";
+
+const ResourceUploadPortal = dynamic(() => import("@/components/ResourceUploadPortal"), {
+  loading: () => (
+    <div className="bg-white border border-slate-200/90 rounded-3xl p-12 text-center">
+      <Loader2 className="w-8 h-8 text-[#00875A] animate-spin mx-auto mb-2" />
+      <p className="text-xs text-slate-400">Loading contribution studio...</p>
+    </div>
+  ),
+});
 
 function YoutubeIcon({ className = "w-4 h-4" }: { className?: string }) {
   return (
@@ -48,33 +69,39 @@ interface UserProfile {
   createdAt?: string;
 }
 
-interface SavedResource {
-  id: string;
-  resourceId: string;
-  title: string;
-  courseCode: string;
-  department: string;
-  type: string;
-  fileSize: string;
-  createdAt: string;
-}
-
-type TabType = "vault" | "upload" | "submissions";
+type TabType = "upload" | "submissions" | "settings";
+const LEVELS = ["100L", "200L", "300L", "400L", "500L"];
 
 export default function ProfilePage() {
   const router = useRouter();
+  const { refresh: refreshAuth, logout: authLogout } = useAuth();
+  const { savedCount, offlineCount, offlineTotalBytes } = useSavedResources();
+
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [savedResources, setSavedResources] = useState<SavedResource[]>([]);
   const [submissions, setSubmissions] = useState<DbSubmission[]>([]);
-  const [activeTab, setActiveTab] = useState<TabType>("vault");
+  const [activeTab, setActiveTab] = useState<TabType>("upload");
   const [loading, setLoading] = useState(true);
   const [updatingAvatar, setUpdatingAvatar] = useState(false);
-  const [removingId, setRemovingId] = useState<string | null>(null);
   const [deletingSubId, setDeletingSubId] = useState<string | null>(null);
+  const [confirmingSubId, setConfirmingSubId] = useState<string | null>(null);
+
+  // Account settings state
+  const [editName, setEditName] = useState("");
+  const [editDept, setEditDept] = useState<string>(DEPARTMENTS[0]);
+  const [editLevel, setEditLevel] = useState<string>("100L");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  // Password change state
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordMsg, setPasswordMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
     fetchProfile();
     fetchSubmissions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchProfile = async () => {
@@ -84,13 +111,15 @@ export default function ProfilePage() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        // If not logged in, redirect to login
         router.push("/login");
         return;
       }
 
-      setUser(data.user);
-      setSavedResources(data.savedResources || []);
+      const u: UserProfile = data.user;
+      setUser(u);
+      setEditName(u.name || "");
+      setEditDept(DEPARTMENTS.includes(u.department) ? u.department : DEPARTMENTS[0]);
+      setEditLevel(LEVELS.includes(u.level) ? u.level : "100L");
     } catch (err) {
       console.error("Failed to load profile:", err);
       router.push("/login");
@@ -126,6 +155,7 @@ export default function ProfilePage() {
       const data = await res.json();
       if (res.ok && data.success) {
         setUser((prev) => (prev ? { ...prev, avatar: newAvatar } : null));
+        await refreshAuth();
       }
     } catch (err) {
       console.error("Failed to update avatar:", err);
@@ -134,28 +164,80 @@ export default function ProfilePage() {
     }
   };
 
-  const handleRemoveSaved = async (resourceId: string) => {
-    try {
-      setRemovingId(resourceId);
-      const res = await fetch(`/api/saved?resourceId=${encodeURIComponent(resourceId)}`, {
-        method: "DELETE",
-      });
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileMsg(null);
+    if (!editName.trim()) {
+      setProfileMsg({ type: "err", text: "Name cannot be empty." });
+      return;
+    }
 
-      if (res.ok) {
-        setSavedResources((prev) => prev.filter((r) => r.resourceId !== resourceId));
+    try {
+      setSavingProfile(true);
+      const res = await fetch("/api/auth/me", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editName.trim(),
+          department: editDept,
+          level: editLevel,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to update profile.");
       }
-    } catch (err) {
-      console.error("Failed to remove saved resource:", err);
+
+      setUser(data.user);
+      await refreshAuth();
+      setProfileMsg({ type: "ok", text: "Academic profile updated." });
+    } catch (err: unknown) {
+      setProfileMsg({
+        type: "err",
+        text: err instanceof Error ? err.message : "Failed to save profile.",
+      });
     } finally {
-      setRemovingId(null);
+      setSavingProfile(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMsg(null);
+    if (!currentPassword || newPassword.length < 6) {
+      setPasswordMsg({
+        type: "err",
+        text: "Enter your current password and a new password of at least 6 characters.",
+      });
+      return;
+    }
+
+    try {
+      setSavingPassword(true);
+      const res = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Could not update password.");
+      }
+
+      setCurrentPassword("");
+      setNewPassword("");
+      setPasswordMsg({ type: "ok", text: "Password updated successfully." });
+    } catch (err: unknown) {
+      setPasswordMsg({
+        type: "err",
+        text: err instanceof Error ? err.message : "Password update failed.",
+      });
+    } finally {
+      setSavingPassword(false);
     }
   };
 
   const handleDeleteSubmission = async (submissionId: string) => {
-    if (!confirm("Are you sure you want to withdraw this document submission?")) {
-      return;
-    }
-
     try {
       setDeletingSubId(submissionId);
       const res = await fetch(`/api/uploads?id=${encodeURIComponent(submissionId)}`, {
@@ -169,12 +251,13 @@ export default function ProfilePage() {
       console.error("Failed to delete submission:", err);
     } finally {
       setDeletingSubId(null);
+      setConfirmingSubId(null);
     }
   };
 
   const handleLogout = async () => {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await authLogout();
       router.push("/");
       router.refresh();
     } catch (err) {
@@ -188,7 +271,7 @@ export default function ProfilePage() {
         <Navbar />
         <div className="flex-1 flex flex-col items-center justify-center p-8">
           <Loader2 className="w-8 h-8 text-[#00875A] animate-spin mb-3" />
-          <p className="text-sm text-slate-500">Loading student profile vault...</p>
+          <p className="text-sm text-slate-500">Loading student account...</p>
         </div>
         <Footer />
       </div>
@@ -205,7 +288,6 @@ export default function ProfilePage() {
         {/* Profile Header Banner */}
         <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-xs mb-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-            {/* Avatar & User Details */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
               <div className="relative group shrink-0">
                 <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden border-2 border-emerald-500 bg-emerald-50 shadow-sm">
@@ -255,7 +337,7 @@ export default function ProfilePage() {
                   </span>
                   <span className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1 rounded-lg bg-emerald-50 text-emerald-800">
                     <UserCheck className="w-3 h-3 text-emerald-600" />
-                    <span>Faculty of Engineering • FUOYE</span>
+                    <span>Faculty of Engineering &bull; FUOYE</span>
                   </span>
                 </div>
               </div>
@@ -263,14 +345,22 @@ export default function ProfilePage() {
 
             {/* Header Actions */}
             <div className="flex items-center gap-2.5 self-start md:self-auto shrink-0 flex-wrap">
-              <button
-                type="button"
-                onClick={() => setActiveTab("upload")}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#00875A] hover:bg-[#00734c] text-white text-xs sm:text-sm font-semibold transition-all shadow-xs cursor-pointer"
+              <Link
+                href="/saved"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition-all shadow-2xs"
               >
-                <UploadCloud className="w-4 h-4" />
-                <span>Contribute Material</span>
-              </button>
+                <Bookmark className="w-4 h-4 text-[#00875A]" />
+                <span>Saved &amp; Offline ({savedCount + offlineCount})</span>
+              </Link>
+
+              {(user.role === "MODERATOR" || user.role === "ADMIN") && (
+                <Link
+                  href="/moderation"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0C3B2E] hover:bg-[#0A251D] text-white text-xs sm:text-sm font-semibold transition-all shadow-xs"
+                >
+                  <span>Moderation Portal</span>
+                </Link>
+              )}
 
               <button
                 type="button"
@@ -289,23 +379,7 @@ export default function ProfilePage() {
           {/* Main Column with Tabs (2 cols) */}
           <div className="lg:col-span-2 space-y-6">
             {/* Navigation Tabs Bar */}
-            <div className="flex items-center gap-2 p-1.5 bg-slate-200/60 rounded-2xl w-fit">
-              <button
-                type="button"
-                onClick={() => setActiveTab("vault")}
-                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 ${
-                  activeTab === "vault"
-                    ? "bg-white text-slate-900 shadow-2xs"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <Bookmark className="w-4 h-4 text-[#00875A]" />
-                <span>Saved Vault</span>
-                <span className="text-[11px] px-1.5 py-0.2 rounded-full bg-slate-100 text-slate-700 font-bold">
-                  {savedResources.length}
-                </span>
-              </button>
-
+            <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-200/60 rounded-2xl w-fit">
               <button
                 type="button"
                 onClick={() => setActiveTab("upload")}
@@ -316,7 +390,7 @@ export default function ProfilePage() {
                 }`}
               >
                 <UploadCloud className="w-4 h-4 text-[#00875A]" />
-                <span>Submit Material (PDF / Video)</span>
+                <span>Contribute Material</span>
               </button>
 
               <button
@@ -334,110 +408,24 @@ export default function ProfilePage() {
                   {submissions.length}
                 </span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("settings")}
+                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+                  activeTab === "settings"
+                    ? "bg-white text-slate-900 shadow-2xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <Settings className="w-4 h-4 text-[#00875A]" />
+                <span>Account &amp; Security</span>
+              </button>
             </div>
 
-            {/* TAB 1: SAVED RESOURCES */}
-            {activeTab === "vault" && (
-              <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-7 shadow-xs">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-[#00875A] flex items-center justify-center">
-                      <Bookmark className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h2 className="text-base sm:text-lg font-bold text-slate-900">
-                        Saved Resources & Reading Vault
-                      </h2>
-                      <p className="text-xs text-slate-400">
-                        {savedResources.length} saved course document{savedResources.length === 1 ? "" : "s"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <Link
-                    href="/courses"
-                    className="text-xs font-semibold text-[#00875A] hover:underline"
-                  >
-                    Browse More
-                  </Link>
-                </div>
-
-                {/* Resource Cards */}
-                <div className="mt-6 space-y-3">
-                  {savedResources.length === 0 ? (
-                    <div className="text-center py-12 px-4 border border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
-                      <FileText className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                      <p className="text-sm font-semibold text-slate-700">No saved resources yet</p>
-                      <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                        Explore the digital library to bookmark textbooks, past questions, and lecture slides for instant access.
-                      </p>
-                      <Link
-                        href="/courses"
-                        className="inline-block mt-4 px-4 py-2 rounded-full text-xs font-semibold text-white bg-[#00875A] hover:bg-[#00734c] transition-all"
-                      >
-                        Explore Library
-                      </Link>
-                    </div>
-                  ) : (
-                    savedResources.map((item) => (
-                      <div
-                        key={item.id}
-                        className="group p-4 rounded-2xl border border-slate-200/80 bg-white hover:border-slate-300 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                      >
-                        <div className="flex items-start gap-3.5">
-                          <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0 group-hover:bg-emerald-50 group-hover:text-emerald-700 transition-colors">
-                            <FileText className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap mb-1">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
-                                {item.courseCode}
-                              </span>
-                              <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800">
-                                {item.department}
-                              </span>
-                            </div>
-                            <h3 className="text-sm font-semibold text-slate-900 group-hover:text-[#0C3B2E] transition-colors leading-snug">
-                              {item.title}
-                            </h3>
-                            <div className="mt-1 text-[11px] text-slate-400">
-                              Size: {item.fileSize} • Type: {item.type}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                          <Link
-                            href={`/resources/${item.resourceId}`}
-                            className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-emerald-700 hover:border-emerald-300 transition-colors"
-                            title="Read or View Resource"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Link>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveSaved(item.resourceId)}
-                            disabled={removingId === item.resourceId}
-                            className="p-2 rounded-xl border border-rose-100 text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
-                            title="Remove Bookmark"
-                          >
-                            {removingId === item.resourceId ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="w-4 h-4" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* TAB 2: UPLOAD PDF PORTAL */}
+            {/* TAB 1: UPLOAD PORTAL */}
             {activeTab === "upload" && (
-              <PdfUploadPortal
+              <ResourceUploadPortal
                 userDepartment={user.department}
                 userLevel={user.level}
                 onSuccess={(newSub) => {
@@ -447,7 +435,7 @@ export default function ProfilePage() {
               />
             )}
 
-            {/* TAB 3: MY CONTRIBUTIONS */}
+            {/* TAB 2: MY CONTRIBUTIONS */}
             {activeTab === "submissions" && (
               <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-7 shadow-xs">
                 <div className="flex items-center justify-between pb-4 border-b border-slate-100">
@@ -460,7 +448,7 @@ export default function ProfilePage() {
                         My Uploaded Contributions
                       </h2>
                       <p className="text-xs text-slate-400">
-                        Track verification and live status of your contributed study materials
+                        Track verification status and moderator feedback on your uploaded materials
                       </p>
                     </div>
                   </div>
@@ -475,21 +463,20 @@ export default function ProfilePage() {
                   </button>
                 </div>
 
-                {/* Submissions List */}
                 <div className="mt-6 space-y-3">
                   {submissions.length === 0 ? (
                     <div className="text-center py-12 px-4 border border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
                       <UploadCloud className="w-10 h-10 text-slate-300 mx-auto mb-2" />
                       <p className="text-sm font-semibold text-slate-700">No submissions uploaded yet</p>
                       <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                        Share your lecture notes, past questions, or formula cheat sheets to earn contributor badges and help fellow engineering peers!
+                        Share lecture handouts, past questions, or YouTube tutorials to help fellow FUOYE engineering students.
                       </p>
                       <button
                         type="button"
                         onClick={() => setActiveTab("upload")}
                         className="inline-block mt-4 px-5 py-2.5 rounded-full text-xs font-semibold text-white bg-[#00875A] hover:bg-[#00734c] transition-all cursor-pointer"
                       >
-                        Submit Your First PDF
+                        Submit Your First Material
                       </button>
                     </div>
                   ) : (
@@ -502,153 +489,155 @@ export default function ProfilePage() {
                       return (
                         <div
                           key={sub.id}
-                          className="group p-4 rounded-2xl border border-slate-200/80 bg-white hover:border-slate-300 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                          className="group p-4 rounded-2xl border border-slate-200/80 bg-white hover:border-slate-300 transition-all flex flex-col gap-3"
                         >
-                          <div className="flex items-start gap-3.5">
-                            {/* Media Icon or YouTube Thumbnail */}
-                            {isYouTube && sub.thumbnailUrl ? (
-                              <div className="w-16 h-11 sm:w-20 sm:h-12 rounded-xl bg-slate-900 overflow-hidden relative shrink-0 shadow-2xs group-hover:scale-102 transition-transform">
-                                <Image
-                                  src={sub.thumbnailUrl}
-                                  alt={sub.title}
-                                  fill
-                                  unoptimized
-                                  className="object-cover"
-                                />
-                                <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
-                                  <div className="w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center shadow-xs">
-                                    <Play className="w-3 h-3 fill-white ml-0.5" />
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="flex items-start gap-3.5">
+                              {isYouTube && sub.thumbnailUrl ? (
+                                <div className="w-16 h-11 sm:w-20 sm:h-12 rounded-xl bg-slate-900 overflow-hidden relative shrink-0 shadow-2xs">
+                                  <Image
+                                    src={sub.thumbnailUrl}
+                                    alt={sub.title}
+                                    fill
+                                    unoptimized
+                                    className="object-cover"
+                                  />
+                                  <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
+                                    <div className="w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center shadow-xs">
+                                      <Play className="w-3 h-3 fill-white ml-0.5" />
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            ) : isYouTube ? (
-                              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
-                                <YoutubeIcon className="w-5 h-5" />
-                              </div>
-                            ) : (
-                              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
-                                <FileText className="w-5 h-5" />
-                              </div>
-                            )}
+                              ) : isYouTube ? (
+                                <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                                  <YoutubeIcon className="w-5 h-5" />
+                                </div>
+                              ) : (
+                                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-[#00875A] flex items-center justify-center shrink-0">
+                                  <FileText className="w-5 h-5" />
+                                </div>
+                              )}
 
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap mb-1">
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
-                                  {sub.courseCode}
-                                </span>
-                                <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
-                                  {sub.department}
-                                </span>
-                                {isYouTube ? (
-                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-red-50 text-red-700 flex items-center gap-1">
-                                    <YoutubeIcon className="w-3 h-3" />
-                                    <span>{sub.type || "Video Tutorial"}</span>
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap mb-1">
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[#0C3B2E] text-white font-mono">
+                                    {sub.courseCode}
                                   </span>
-                                ) : (
+                                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                                    {sub.department}
+                                  </span>
+                                  {sub.sessionYear && (
+                                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/70">
+                                      {sub.sessionYear}
+                                    </span>
+                                  )}
                                   <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800">
                                     {sub.type}
                                   </span>
-                                )}
+                                </div>
+
+                                <h3 className="text-sm font-semibold text-slate-900 leading-snug">
+                                  {sub.title}
+                                </h3>
+
+                                <div className="mt-1 flex items-center gap-2.5 text-[11px] text-slate-400 flex-wrap">
+                                  <span>{isYouTube ? "YouTube Video" : sub.fileSize}</span>
+                                  <span>&bull;</span>
+                                  <span>{sub.semester}</span>
+                                  <span>&bull;</span>
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="w-3 h-3 text-slate-400" />
+                                    {new Date(sub.createdAt).toLocaleDateString()}
+                                  </span>
+                                </div>
                               </div>
-
-                              <h3 className="text-sm font-semibold text-slate-900 group-hover:text-[#0C3B2E] transition-colors leading-snug">
-                                {sub.title}
-                              </h3>
-
-                              <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-400 flex-wrap">
-                                {isYouTube ? (
-                                  <span className="text-red-600 font-medium">YouTube Video Tutorial</span>
-                                ) : (
-                                  <span>Size: {sub.fileSize}</span>
-                                )}
-                                <span>•</span>
-                                <span className="truncate max-w-[180px]">
-                                  {sub.fileName}
-                                </span>
-                                <span>•</span>
-                                <span className="flex items-center gap-1">
-                                  <Clock className="w-3 h-3 text-slate-400" />
-                                  {new Date(sub.createdAt).toLocaleDateString()}
-                                </span>
-                              </div>
-
-                              {sub.description && (
-                                <p className="mt-1.5 text-xs text-slate-500 line-clamp-1 italic">
-                                  &quot;{sub.description}&quot;
-                                </p>
-                              )}
                             </div>
-                          </div>
 
-                          <div className="flex items-center gap-2.5 self-end sm:self-center shrink-0 flex-wrap">
-                            {/* Status Badge */}
-                            {isPending && (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200/80">
-                                <Clock className="w-3 h-3" />
-                                <span>Awaiting Moderation</span>
-                              </span>
-                            )}
-                            {isApproved && (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200/80">
-                                <FileCheck2 className="w-3 h-3" />
-                                <span>Approved & Live</span>
-                              </span>
-                            )}
-                            {isRejected && (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-200/80">
-                                <span>Reviewer Notes</span>
-                              </span>
-                            )}
+                            <div className="flex items-center gap-2 self-end sm:self-center shrink-0 flex-wrap">
+                              {isPending && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200/80">
+                                  <Clock className="w-3 h-3" />
+                                  <span>Pending Review</span>
+                                </span>
+                              )}
+                              {isApproved && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200/80">
+                                  <FileCheck2 className="w-3 h-3" />
+                                  <span>Live in Library</span>
+                                </span>
+                              )}
+                              {isRejected && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-200/80">
+                                  <span>Needs Revision</span>
+                                </span>
+                              )}
 
-                            {/* View / Download Actions */}
-                            {isYouTube ? (
-                              <a
-                                href={sub.youtubeUrl || sub.fileUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
-                                title="Watch Tutorial on YouTube"
-                              >
-                                <Play className="w-3.5 h-3.5 fill-white" />
-                                <span>Watch</span>
-                              </a>
-                            ) : sub.fileUrl && sub.fileUrl !== "#" ? (
-                              <>
-                                <a
-                                  href={sub.fileUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-300 transition-colors"
-                                  title="Preview Document"
+                              {isApproved && (
+                                <Link
+                                  href={`/resources?open=${encodeURIComponent(sub.id)}`}
+                                  className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-[#00875A] hover:border-emerald-300 transition-colors"
+                                  title="Open in Library"
                                 >
                                   <Eye className="w-4 h-4" />
-                                </a>
+                                </Link>
+                              )}
+
+                              {!isYouTube && sub.fileUrl && sub.fileUrl !== "#" && (
                                 <a
                                   href={sub.fileUrl}
                                   download={sub.fileName}
                                   className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-emerald-700 hover:border-emerald-300 transition-colors"
-                                  title="Download PDF"
+                                  title="Download File"
                                 >
                                   <Download className="w-4 h-4" />
                                 </a>
-                              </>
-                            ) : null}
-
-                            {/* Delete submission */}
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteSubmission(sub.id)}
-                              disabled={deletingSubId === sub.id}
-                              className="p-2 rounded-xl border border-rose-100 text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
-                              title="Withdraw submission"
-                            >
-                              {deletingSubId === sub.id ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="w-4 h-4" />
                               )}
-                            </button>
+
+                              {confirmingSubId === sub.id ? (
+                                <div className="flex items-center gap-1.5 p-1 rounded-xl bg-rose-50 border border-rose-200">
+                                  <span className="text-[11px] font-semibold text-rose-700 px-1">Withdraw?</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteSubmission(sub.id)}
+                                    disabled={deletingSubId === sub.id}
+                                    className="px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
+                                  >
+                                    {deletingSubId === sub.id ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <>
+                                        <Check className="w-3 h-3" />
+                                        <span>Yes</span>
+                                      </>
+                                    )}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmingSubId(null)}
+                                    className="p-1 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-white transition-colors cursor-pointer"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmingSubId(sub.id)}
+                                  className="p-2 rounded-xl border border-rose-100 text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
+                                  title="Withdraw submission"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
                           </div>
+
+                          {isRejected && sub.rejectionReason && (
+                            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800">
+                              <span className="font-bold">Moderator Note: </span>
+                              {sub.rejectionReason}
+                            </div>
+                          )}
                         </div>
                       );
                     })
@@ -656,55 +645,222 @@ export default function ProfilePage() {
                 </div>
               </div>
             )}
+
+            {/* TAB 3: ACCOUNT & SECURITY */}
+            {activeTab === "settings" && (
+              <div className="space-y-6">
+                {/* Academic Profile Update */}
+                <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-7 shadow-xs">
+                  <div className="flex items-center gap-2 pb-4 border-b border-slate-100 mb-5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-[#00875A] flex items-center justify-center">
+                      <Settings className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h2 className="text-base sm:text-lg font-bold text-slate-900">
+                        Academic Profile Details
+                      </h2>
+                      <p className="text-xs text-slate-400">
+                        Keep your department and academic level up to date each session
+                      </p>
+                    </div>
+                  </div>
+
+                  {profileMsg && (
+                    <div
+                      className={`mb-4 p-3 rounded-xl border text-xs font-semibold flex items-center gap-2 ${
+                        profileMsg.type === "ok"
+                          ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                          : "bg-rose-50 border-rose-200 text-rose-700"
+                      }`}
+                    >
+                      {profileMsg.type === "ok" ? (
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                      )}
+                      <span>{profileMsg.text}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSaveProfile} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Full Name
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A]"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Department
+                        </label>
+                        <select
+                          value={editDept}
+                          onChange={(e) => setEditDept(e.target.value)}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+                        >
+                          {DEPARTMENTS.map((dept) => (
+                            <option key={dept} value={dept}>
+                              {dept}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Academic Level
+                        </label>
+                        <select
+                          value={editLevel}
+                          onChange={(e) => setEditLevel(e.target.value)}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+                        >
+                          {LEVELS.map((lvl) => (
+                            <option key={lvl} value={lvl}>
+                              {lvl}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={savingProfile}
+                      className="px-5 py-2.5 rounded-xl bg-[#00875A] hover:bg-[#00734c] disabled:opacity-60 text-white text-xs sm:text-sm font-semibold transition-all shadow-2xs cursor-pointer inline-flex items-center gap-2"
+                    >
+                      {savingProfile && <Loader2 className="w-4 h-4 animate-spin" />}
+                      <span>Save Profile Changes</span>
+                    </button>
+                  </form>
+                </div>
+
+                {/* Change Password */}
+                <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-7 shadow-xs">
+                  <div className="flex items-center gap-2 pb-4 border-b border-slate-100 mb-5">
+                    <div className="w-8 h-8 rounded-lg bg-slate-100 text-[#0C3B2E] flex items-center justify-center">
+                      <Lock className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h2 className="text-base sm:text-lg font-bold text-slate-900">
+                        Change Password
+                      </h2>
+                      <p className="text-xs text-slate-400">
+                        Update your NUESA Library login password
+                      </p>
+                    </div>
+                  </div>
+
+                  {passwordMsg && (
+                    <div
+                      className={`mb-4 p-3 rounded-xl border text-xs font-semibold flex items-center gap-2 ${
+                        passwordMsg.type === "ok"
+                          ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                          : "bg-rose-50 border-rose-200 text-rose-700"
+                      }`}
+                    >
+                      {passwordMsg.type === "ok" ? (
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                      )}
+                      <span>{passwordMsg.text}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleChangePassword} className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Current Password
+                        </label>
+                        <input
+                          type="password"
+                          required
+                          value={currentPassword}
+                          onChange={(e) => setCurrentPassword(e.target.value)}
+                          placeholder="Enter current password"
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          New Password (min. 6 characters)
+                        </label>
+                        <input
+                          type="password"
+                          required
+                          minLength={6}
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="Enter new password"
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={savingPassword}
+                      className="px-5 py-2.5 rounded-xl bg-[#0C3B2E] hover:bg-[#0A251D] disabled:opacity-60 text-white text-xs sm:text-sm font-semibold transition-all shadow-2xs cursor-pointer inline-flex items-center gap-2"
+                    >
+                      {savingPassword && <Loader2 className="w-4 h-4 animate-spin" />}
+                      <span>Update Password</span>
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Right Column: Academic Details & Stats */}
+          {/* Right Column: Live Vault Summary & Department Details */}
           <div className="space-y-6">
-            {/* Quick Stats Card */}
+            {/* Live Saved & Offline Vault Card */}
             <div className="bg-white border border-slate-200/90 rounded-3xl p-6 shadow-xs">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">
-                Academic Vault Metrics
+                Study Shelf &amp; Offline Vault
               </h3>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="p-3.5 rounded-2xl bg-[#F8FAFC] border border-slate-100 text-center">
-                  <div className="text-xl font-extrabold text-[#0C3B2E]">
-                    {savedResources.length}
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-1">Saved</div>
+                  <div className="text-xl font-extrabold text-[#0C3B2E]">{savedCount}</div>
+                  <div className="text-[11px] text-slate-500 mt-1">Bookmarked</div>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-[#F8FAFC] border border-slate-100 text-center">
-                  <div className="text-xl font-extrabold text-[#00875A]">
-                    {submissions.length}
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-1">Uploaded</div>
+                  <div className="text-xl font-extrabold text-[#00875A]">{offlineCount}</div>
+                  <div className="text-[11px] text-slate-500 mt-1">Offline PDFs</div>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-[#F8FAFC] border border-slate-100 text-center">
-                  <div className="text-xl font-extrabold text-slate-800">
-                    {user.level}
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-1">Level</div>
+                  <div className="text-xl font-extrabold text-slate-800">{submissions.length}</div>
+                  <div className="text-[11px] text-slate-500 mt-1">Contributed</div>
                 </div>
               </div>
-            </div>
 
-            {/* Student Upload Quick Action */}
-            <div className="bg-gradient-to-br from-[#0C3B2E] to-[#00875A] text-white rounded-3xl p-6 shadow-xs">
-              <div className="flex items-center gap-2 mb-2">
-                <UploadCloud className="w-5 h-5 text-emerald-300" />
-                <h4 className="text-sm font-bold tracking-tight">
-                  Contribute Engineering Materials
-                </h4>
-              </div>
-              <p className="text-xs text-emerald-100/90 leading-relaxed mb-4">
-                Have verified past questions, exam solutions, or lecturer slides? Upload them to help all FUOYE engineering colleagues.
-              </p>
-              <button
-                type="button"
-                onClick={() => setActiveTab("upload")}
-                className="w-full py-2.5 px-4 rounded-xl bg-white text-[#0C3B2E] hover:bg-emerald-50 text-xs font-bold transition-all shadow-xs cursor-pointer text-center"
+              {offlineCount > 0 && (
+                <div className="mb-4 px-3 py-2 rounded-xl bg-emerald-50/70 border border-emerald-200/70 text-[11px] font-medium text-emerald-900 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5">
+                    <HardDriveDownload className="w-3.5 h-3.5 text-[#00875A]" />
+                    <span>Offline Storage Used</span>
+                  </span>
+                  <span className="font-bold">{formatBytes(offlineTotalBytes)}</span>
+                </div>
+              )}
+
+              <Link
+                href="/saved"
+                className="w-full py-2.5 px-4 rounded-xl bg-[#0C3B2E] hover:bg-[#0A251D] text-white text-xs font-bold transition-all flex items-center justify-center gap-2"
               >
-                Open PDF Upload Portal
-              </button>
+                <span>Open Saved &amp; Offline Materials</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
             </div>
 
             {/* Department Info Card */}

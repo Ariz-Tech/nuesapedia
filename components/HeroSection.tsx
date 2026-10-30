@@ -1,16 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import HeroBackgroundLines from "./HeroBackgroundLines";
 
 export default function HeroSection() {
+  const router = useRouter();
   const [query, setQuery] = useState("");
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (query.trim()) {
-      window.location.href = `/resources?search=${encodeURIComponent(query.trim())}`;
+      router.push(`/resources?search=${encodeURIComponent(query.trim())}`);
+    } else {
+      router.push("/resources");
     }
   };
 

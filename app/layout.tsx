@@ -1,6 +1,9 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+import { AuthProvider } from "@/context/AuthContext";
+import { SavedResourcesProvider } from "@/context/SavedResourcesContext";
+import PwaRegistration from "@/components/PwaRegistration";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -12,10 +15,29 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const plusJakarta = Plus_Jakarta_Sans({
+  variable: "--font-jakarta",
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+});
+
+export const viewport: Viewport = {
+  themeColor: "#0C3B2E",
+};
+
 export const metadata: Metadata = {
-  title: "NuesaPedia — Digital Faculty Library | FUOYE Engineering",
+  title: "The NUESA Library — Digital Faculty Library | FUOYE Engineering",
   description:
-    "Everything you need to study engineering. Access course materials, textbooks, past questions, videos, and study resources for FUOYE engineering courses all in one place.",
+    "Everything you need to study engineering. Access course materials, textbooks, past questions, videos, and offline downloaded documents for FUOYE engineering courses all in one place.",
+  icons: {
+    icon: "/icons/icon.svg",
+    apple: "/icons/icon.svg",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "The NUESA Library",
+  },
 };
 
 export default function RootLayout({
@@ -24,9 +46,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} ${plusJakarta.variable} h-full antialiased`}
+    >
       <body className="min-h-full flex flex-col bg-[#FAFAFA] text-slate-900 selection:bg-emerald-100 selection:text-emerald-900">
-        {children}
+        <AuthProvider>
+          <SavedResourcesProvider>
+            <PwaRegistration />
+            {children}
+          </SavedResourcesProvider>
+        </AuthProvider>
       </body>
     </html>
   );

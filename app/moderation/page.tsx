@@ -24,6 +24,7 @@ import {
   Eye,
   MessageSquare,
   BookOpen,
+  Flag,
 } from "lucide-react";
 import { DEPARTMENTS } from "@/lib/departments";
 
@@ -81,6 +82,29 @@ interface UserDirectoryItem {
   createdAt: string;
 }
 
+interface MaterialRequestItem {
+  id: string;
+  requesterName?: string;
+  courseCode: string;
+  department: string;
+  level: string;
+  type: string;
+  details?: string;
+  status: "OPEN" | "FULFILLED";
+  createdAt: string;
+}
+
+interface ResourceReportItem {
+  id: string;
+  resourceId: string;
+  resourceTitle: string;
+  courseCode: string;
+  reason: string;
+  details?: string;
+  status: "OPEN" | "RESOLVED";
+  createdAt: string;
+}
+
 const PRESET_REJECTION_REASONS = [
   "Incomplete notes or missing key chapters.",
   "Low scan legibility or blurriness.",
@@ -93,8 +117,8 @@ export default function ModerationPortalPage() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
 
-  // Active top portal tab: "queue" | "users"
-  const [activePortalTab, setActivePortalTab] = useState<"queue" | "users">("queue");
+  // Active top portal tab: "queue" | "requests" | "reports" | "users"
+  const [activePortalTab, setActivePortalTab] = useState<"queue" | "requests" | "reports" | "users">("queue");
 
   // Review Queue state
   const [submissions, setSubmissions] = useState<SubmissionItem[]>([]);
@@ -115,6 +139,12 @@ export default function ModerationPortalPage() {
   const [usersLoading, setUsersLoading] = useState(false);
   const [userSearchQuery, setUserSearchQuery] = useState("");
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+
+  // Student Material Requests & Issue Reports state
+  const [materialRequests, setMaterialRequests] = useState<MaterialRequestItem[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [resourceReports, setResourceReports] = useState<ResourceReportItem[]>([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
 
   // Check auth on mount
   useEffect(() => {
@@ -163,9 +193,76 @@ export default function ModerationPortalPage() {
     }
   };
 
+  const fetchRequests = async () => {
+    try {
+      setRequestsLoading(true);
+      const res = await fetch("/api/requests?status=ALL");
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMaterialRequests(data.data || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch material requests:", err);
+    } finally {
+      setRequestsLoading(false);
+    }
+  };
+
+  const fetchReports = async () => {
+    try {
+      setReportsLoading(true);
+      const res = await fetch("/api/resources/all/report?status=ALL");
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setResourceReports(data.data || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch resource reports:", err);
+    } finally {
+      setReportsLoading(false);
+    }
+  };
+
+  const handleToggleRequestStatus = async (id: string, status: "OPEN" | "FULFILLED") => {
+    try {
+      const res = await fetch("/api/requests", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMaterialRequests((prev) =>
+          prev.map((r) => (r.id === id ? { ...r, status } : r))
+        );
+      }
+    } catch (err) {
+      console.error("Failed to update request:", err);
+    }
+  };
+
+  const handleResolveReport = async (reportId: string) => {
+    try {
+      const res = await fetch("/api/resources/all/report", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportId }),
+      });
+      if (res.ok) {
+        setResourceReports((prev) =>
+          prev.map((r) => (r.id === reportId ? { ...r, status: "RESOLVED" } : r))
+        );
+      }
+    } catch (err) {
+      console.error("Failed to resolve report:", err);
+    }
+  };
+
   useEffect(() => {
     if (currentUser && (currentUser.role === "MODERATOR" || currentUser.role === "ADMIN")) {
       fetchSubmissions();
+      fetchRequests();
+      fetchReports();
     }
   }, [currentUser]);
 
@@ -539,6 +636,50 @@ export default function ModerationPortalPage() {
               </span>
             </button>
 
+            <button
+              type="button"
+              onClick={() => setActivePortalTab("requests")}
+              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+                activePortalTab === "requests"
+                  ? "bg-[#0C3B2E] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>Student Requests</span>
+              <span
+                className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
+                  activePortalTab === "requests"
+                    ? "bg-[#00875A] text-white"
+                    : "bg-slate-200 text-slate-700"
+                }`}
+              >
+                {materialRequests.filter((r) => r.status === "OPEN").length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActivePortalTab("reports")}
+              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+                activePortalTab === "reports"
+                  ? "bg-[#0C3B2E] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+              }`}
+            >
+              <Flag className="w-4 h-4" />
+              <span>Issue Reports</span>
+              <span
+                className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
+                  activePortalTab === "reports"
+                    ? "bg-[#00875A] text-white"
+                    : "bg-slate-200 text-slate-700"
+                }`}
+              >
+                {resourceReports.filter((r) => r.status === "OPEN").length}
+              </span>
+            </button>
+
             {isAdmin && (
               <button
                 type="button"
@@ -840,6 +981,183 @@ export default function ModerationPortalPage() {
                           </button>
                         )}
                       </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: STUDENT MATERIAL REQUESTS */}
+        {activePortalTab === "requests" && (
+          <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-xs">
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Student Material Requests</h2>
+                <p className="text-xs text-slate-500">
+                  Missing past questions, lecture notes, and textbooks requested by engineering students.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={fetchRequests}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                Refresh
+              </button>
+            </div>
+
+            {requestsLoading ? (
+              <div className="p-12 text-center">
+                <Loader2 className="w-7 h-7 text-[#00875A] animate-spin mx-auto mb-2" />
+                <p className="text-xs text-slate-500">Loading requests...</p>
+              </div>
+            ) : materialRequests.length === 0 ? (
+              <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl">
+                <p className="text-sm font-semibold text-slate-700">No open material requests</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Student requests submitted from the Resources page will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {materialRequests.map((req) => (
+                  <div
+                    key={req.id}
+                    className="p-4 rounded-2xl border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="px-2 py-0.5 rounded-md bg-[#0C3B2E] text-white font-mono text-xs font-bold">
+                          {req.courseCode}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">
+                          {req.department} &bull; {req.level}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-xs font-semibold">
+                          {req.type}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                            req.status === "FULFILLED"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          {req.status}
+                        </span>
+                      </div>
+                      {req.details && (
+                        <p className="text-xs text-slate-600 mt-1">{req.details}</p>
+                      )}
+                      <div className="text-[11px] text-slate-400 mt-1">
+                        Requested by {req.requesterName || "Student"} &bull;{" "}
+                        {new Date(req.createdAt).toLocaleDateString()}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleToggleRequestStatus(
+                          req.id,
+                          req.status === "OPEN" ? "FULFILLED" : "OPEN"
+                        )
+                      }
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold shrink-0 cursor-pointer transition-colors ${
+                        req.status === "OPEN"
+                          ? "bg-[#00875A] hover:bg-[#00734c] text-white"
+                          : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {req.status === "OPEN" ? "Mark Fulfilled" : "Reopen"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: ISSUE REPORTS */}
+        {activePortalTab === "reports" && (
+          <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-xs">
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Flagged Resource Issues</h2>
+                <p className="text-xs text-slate-500">
+                  Broken files, illegible scans, or wrong course metadata reported by students.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={fetchReports}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                Refresh
+              </button>
+            </div>
+
+            {reportsLoading ? (
+              <div className="p-12 text-center">
+                <Loader2 className="w-7 h-7 text-[#00875A] animate-spin mx-auto mb-2" />
+                <p className="text-xs text-slate-500">Loading reports...</p>
+              </div>
+            ) : resourceReports.length === 0 ? (
+              <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl">
+                <p className="text-sm font-semibold text-slate-700">No reported resource issues</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  All published library materials are clear of student issue flags.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {resourceReports.map((rep) => (
+                  <div
+                    key={rep.id}
+                    className="p-4 rounded-2xl border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="px-2 py-0.5 rounded-md bg-[#0C3B2E] text-white font-mono text-xs font-bold">
+                          {rep.courseCode}
+                        </span>
+                        <span className="text-sm font-bold text-slate-900">
+                          {rep.resourceTitle}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                            rep.status === "RESOLVED"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-rose-100 text-rose-800"
+                          }`}
+                        >
+                          {rep.status}
+                        </span>
+                      </div>
+                      <p className="text-xs font-semibold text-rose-700">{rep.reason}</p>
+                      {rep.details && (
+                        <p className="text-xs text-slate-600 mt-0.5">{rep.details}</p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Link
+                        href={`/resources?open=${encodeURIComponent(rep.resourceId)}`}
+                        className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        Inspect
+                      </Link>
+                      {rep.status === "OPEN" && (
+                        <button
+                          type="button"
+                          onClick={() => handleResolveReport(rep.id)}
+                          className="px-3.5 py-1.5 rounded-xl bg-[#00875A] hover:bg-[#00734c] text-white text-xs font-bold cursor-pointer"
+                        >
+                          Mark Resolved
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}

@@ -1,10 +1,10 @@
-# NuesaPedia — Complete User Flows & Architecture
+# The NUESA Library — Complete User Flows & Architecture
 
-**Project:** NuesaPedia (Digital Faculty Library)  
-**Version:** 1.0  
+**Project:** The NUESA Library (Digital Faculty Library)  
+**Version:** 1.1  
 **Target Audience:** Engineering Undergraduates, Researchers, Faculty Members & Moderators  
 **Faculty:** Faculty of Engineering (FUOYE / NUESA)  
-**Architecture:** Next.js App Router + PostgreSQL + Prisma + Cloudflare R2 + Meilisearch + Upstash Redis + OpenAI (RAG)  
+**Primary Navigation:** `/` (Home), `/resources` (Unified Course Materials), `/saved` (Bookmarks & Downloaded Offline Vault), plus Navbar Course Search  
 
 ---
 

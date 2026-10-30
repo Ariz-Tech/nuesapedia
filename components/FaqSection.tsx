@@ -16,9 +16,9 @@ export default function FaqSection() {
   const faqs: FaqItem[] = [
     {
       id: "faq-1",
-      question: "What courses are available on NuesaPedia?",
+      question: "What courses are available on The NUESA Library?",
       answer:
-        "NuesaPedia covers core and elective courses across Civil, Mechanical, Materials and Metallurgical, Agric and Bio Resources, and Mining Engineering. You can browse by department, search by course code, or explore the latest arrivals for the most recently added materials.",
+        "The NUESA Library covers core and elective courses across Civil, Mechanical, Materials and Metallurgical, Agric and Bio Resources, and Mining Engineering. You can browse by department, search by course code, or explore the latest arrivals for the most recently added materials.",
     },
     {
       id: "faq-2",
@@ -30,7 +30,7 @@ export default function FaqSection() {
       id: "faq-3",
       question: "Is the platform free for FUOYE engineering students?",
       answer:
-        "Yes! NuesaPedia is 100% free for all engineering students. It is an open academic library curated by the Engineering Faculty Board to support students throughout their academic journey.",
+        "Yes! The NUESA Library is 100% free for all engineering students. It is an open academic library curated by the Engineering Faculty Board to support students throughout their academic journey.",
     },
     {
       id: "faq-4",
@@ -46,9 +46,9 @@ export default function FaqSection() {
     },
     {
       id: "faq-6",
-      question: "Can I use NuesaPedia on my phone or tablet?",
+      question: "Can I use The NUESA Library on my phone or tablet?",
       answer:
-        "Absolutely. NuesaPedia is built as a responsive Progressive Web App (PWA). You can install it on Android, iOS, or desktop and even read downloaded materials offline.",
+        "Absolutely. The NUESA Library is built as a responsive Progressive Web App (PWA). You can install it on Android, iOS, or desktop and even read downloaded materials offline.",
     },
   ];
 
@@ -65,7 +65,7 @@ export default function FaqSection() {
             Frequently Asked Questions
           </h2>
           <p className="mt-2 text-sm sm:text-base text-slate-500">
-            Find answers to common questions about using NuesaPedia for your engineering studies.
+            Find answers to common questions about using The NUESA Library for your engineering studies.
           </p>
         </div>
 

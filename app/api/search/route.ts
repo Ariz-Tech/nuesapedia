@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getAllSubmissions } from "@/lib/db";
+import { getApprovedResourcesPaginated } from "@/lib/db";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 interface SearchResultItem {
   id: string;
@@ -20,8 +21,26 @@ interface SearchResultItem {
 
 export async function GET(request: Request) {
   try {
+    const ip = getClientIp(request);
+    const rate = checkRateLimit(`search:${ip}`, {
+      intervalMs: 60000,
+      maxRequests: 60,
+    });
+    if (!rate.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: "RATE_LIMITED",
+            message: "Search rate limit exceeded. Please wait before trying again.",
+          },
+        },
+        { status: 429 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
-    const q = (searchParams.get("q") || "").trim().toLowerCase();
+    const q = (searchParams.get("q") || "").trim();
     const department = searchParams.get("department");
     const course = searchParams.get("course");
     const level = searchParams.get("level");
@@ -29,85 +48,60 @@ export async function GET(request: Request) {
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "20", 10)));
 
-    // Load live approved submissions from database
-    const approvedSubmissions: SearchResultItem[] = (await getAllSubmissions("APPROVED")).map((sub) => ({
-      id: sub.id,
-      title: sub.title,
-      description: sub.description || `${sub.courseCode} ${sub.type} - Faculty of Engineering FUOYE`,
-      type: sub.type || (sub.medium === "YOUTUBE" ? "Video Tutorial" : "Lecture Note"),
-      medium: sub.medium || (sub.youtubeUrl ? "YOUTUBE" : "PDF"),
-      department: sub.department,
-      level: sub.level,
-      course: {
-        code: sub.courseCode,
-        title: sub.courseCode,
-      },
-      fileUrl: sub.fileUrl,
-      youtubeUrl: sub.youtubeUrl,
-    }));
-
-    let filtered = approvedSubmissions;
-
-    if (q) {
-      filtered = filtered.filter((item) => {
-        const inTitle = item.title.toLowerCase().includes(q);
-        const inCourseCode = item.course.code.toLowerCase().includes(q);
-        const inCourseTitle = item.course.title.toLowerCase().includes(q);
-        const inDesc = item.description.toLowerCase().includes(q);
-        const inDept = item.department.toLowerCase().includes(q);
-        return inTitle || inCourseCode || inCourseTitle || inDesc || inDept;
-      });
-    }
-
-    if (department && department !== "All") {
-      filtered = filtered.filter(
-        (item) => item.department.toLowerCase().includes(department.toLowerCase())
-      );
-    }
-
-    if (course && course !== "All") {
-      filtered = filtered.filter(
-        (item) => item.course.code.toLowerCase() === course.toLowerCase()
-      );
-    }
-
-    if (level && level !== "All") {
-      filtered = filtered.filter((item) => item.level.includes(level));
-    }
-
-    if (type && type !== "All") {
-      filtered = filtered.filter((item) =>
-        type.toLowerCase() === "pdf" ? item.medium === "PDF" : item.medium === "YOUTUBE"
-      );
-    }
-
-    const total = filtered.length;
-    const totalPages = Math.ceil(total / limit) || 1;
-    const startIndex = (page - 1) * limit;
-    const paginated = filtered.slice(startIndex, startIndex + limit);
+    const result = await getApprovedResourcesPaginated({
+      query: course && course !== "All" ? `${q} ${course}`.trim() : q,
+      department: department !== "All" ? department : undefined,
+      level: level !== "All" ? level : undefined,
+      medium: type !== "All" ? type : undefined,
+      page,
+      limit,
+    });
 
     // Add highlight snippets
-    const data = paginated.map((item) => {
-      let highlight = item.description;
-      if (q && item.title.toLowerCase().includes(q)) {
+    const data: SearchResultItem[] = result.resources.map((item) => {
+      const desc = item.description || `${item.courseCode} ${item.type} - Faculty of Engineering FUOYE`;
+      let highlight = desc;
+      if (q && item.title.toLowerCase().includes(q.toLowerCase())) {
         highlight = `Match in title: ${item.title}`;
+      } else if (q && item.courseCode.toLowerCase().includes(q.toLowerCase())) {
+        highlight = `Match in course: ${item.courseCode}`;
       }
+
       return {
-        ...item,
+        id: item.id,
+        title: item.title,
+        description: desc,
+        type: item.type || (item.medium === "YOUTUBE" ? "Video Tutorial" : "Lecture Note"),
+        medium: item.medium || (item.youtubeUrl ? "YOUTUBE" : "PDF"),
+        department: item.department,
+        level: item.level,
+        course: {
+          code: item.courseCode,
+          title: item.courseCode,
+        },
+        fileUrl: item.fileUrl,
+        youtubeUrl: item.youtubeUrl,
         highlight,
       };
     });
 
-    return NextResponse.json({
-      success: true,
-      data,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages,
+    return NextResponse.json(
+      {
+        success: true,
+        data,
+        pagination: {
+          page: result.page,
+          limit: result.limit,
+          total: result.total,
+          totalPages: result.totalPages,
+        },
       },
-    });
+      {
+        headers: {
+          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120",
+        },
+      }
+    );
   } catch (error) {
     console.error("Search API error:", error);
     return NextResponse.json(

@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { BookOpen, Dices, Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 import { getRandomAvatar } from "@/lib/avatars";
 
 import { DEPARTMENTS } from "@/lib/departments";
@@ -13,6 +14,7 @@ const LEVELS = ["100L", "200L", "300L", "400L", "500L"];
 
 export default function SignupPage() {
   const router = useRouter();
+  const { refresh: refreshAuth } = useAuth();
 
   const [checkingAuth, setCheckingAuth] = useState(true);
   // Initial random avatar
@@ -60,8 +62,8 @@ export default function SignupPage() {
       return;
     }
 
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
+    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+      setError("Password must be at least 8 characters and contain both letters and numbers.");
       return;
     }
 
@@ -87,6 +89,7 @@ export default function SignupPage() {
       }
 
       // Redirect to profile upon successful account creation
+      await refreshAuth();
       router.push("/profile");
       router.refresh();
     } catch (err: unknown) {
@@ -115,7 +118,7 @@ export default function SignupPage() {
             <BookOpen className="w-5 h-5" />
           </div>
           <span className="text-2xl font-bold tracking-tight text-slate-900">
-            NuesaPedia
+            The NUESA Library
           </span>
         </Link>
         <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
@@ -177,7 +180,7 @@ export default function SignupPage() {
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Babatunde Adeyemi"
+                placeholder="e.g. Adesola Johnson"
                 className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition-all text-slate-900"
               />
             </div>
@@ -286,7 +289,7 @@ export default function SignupPage() {
                   </>
                 ) : (
                   <>
-                    <span>Sign up with NuesaPedia</span>
+                    <span>Sign up with The NUESA Library</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
