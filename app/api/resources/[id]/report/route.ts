@@ -1,106 +1,59 @@
-import { NextResponse } from "next/server";
-import { getSession, hasModeratorAccess } from "@/lib/auth";
-import {
-  createResourceReport,
-  getResourceById,
-  getResourceReports,
-  resolveResourceReport,
-} from "@/lib/db";
+import { createResourceReport, getResourceById } from "@/lib/db";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { apiError, apiSuccess } from "@/lib/api-helpers";
 
-export const dynamic = "force-dynamic";
-
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
-
-export async function POST(request: Request, { params }: RouteParams) {
+/**
+ * POST /api/resources/:id/report
+ * Submits a quality/copyright/broken-file report for a specific resource.
+ */
+export async function POST(
+  req: Request,
+  context: { params: Promise<{ id: string }> }
+) {
   try {
-    const ip = getClientIp(request);
-    const rate = checkRateLimit(`report:${ip}`, {
-      intervalMs: 600000,
-      maxRequests: 10,
+    const ip = getClientIp(req);
+    const rl = await checkRateLimit(`report:${ip}`, {
+      limit: 5,
+      windowMs: 10 * 60 * 1000,
     });
-    if (!rate.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: { code: "RATE_LIMITED", message: "Too many reports submitted recently." },
-        },
-        { status: 429 }
+    if (!rl.allowed) {
+      return apiError(
+        "RATE_LIMITED",
+        `Too many reports submitted. Please wait ${rl.retryAfterSeconds}s.`,
+        429,
+        { "Retry-After": String(rl.retryAfterSeconds) }
       );
     }
 
-    const { id } = await params;
-    const body = await request.json().catch(() => ({}));
-    const reason = (body.reason || "").trim();
-    const details = (body.details || "").trim();
+    const { id } = await context.params;
+    const body = await req.json();
+    const { resourceTitle, courseCode, reason, details } = body ?? {};
 
-    if (!id || !reason) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: { code: "VALIDATION_ERROR", message: "Report reason is required." },
-        },
-        { status: 400 }
+    if (!reason || typeof reason !== "string" || !reason.trim()) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Please specify a reason for reporting this material.",
+        400
       );
     }
 
     const existing = await getResourceById(id);
+
     const report = await createResourceReport({
       resourceId: id,
-      resourceTitle: body.resourceTitle || existing?.title || "Course Material",
-      courseCode: body.courseCode || existing?.courseCode || "ENG",
-      reason,
-      details,
+      resourceTitle:
+        existing?.title ||
+        (resourceTitle ? String(resourceTitle).trim().slice(0, 200) : "Academic Resource"),
+      courseCode:
+        existing?.courseCode ||
+        (courseCode ? String(courseCode).trim().toUpperCase().slice(0, 20) : "GEN"),
+      reason: reason.trim().slice(0, 120),
+      details: details ? String(details).trim().slice(0, 800) : undefined,
     });
 
-    return NextResponse.json({ success: true, data: report }, { status: 201 });
+    return apiSuccess({ report }, 201);
   } catch (error) {
     console.error("POST /api/resources/[id]/report error:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: { code: "INTERNAL_ERROR", message: "Failed to submit issue report." },
-      },
-      { status: 500 }
-    );
+    return apiError("INTERNAL_ERROR", "Failed to submit report.", 500);
   }
 }
-
-export async function GET(request: Request) {
-  const session = await getSession();
-  if (!session || !hasModeratorAccess(session.role)) {
-    return NextResponse.json(
-      { success: false, error: { code: "FORBIDDEN", message: "Moderator access required." } },
-      { status: 403 }
-    );
-  }
-
-  const { searchParams } = new URL(request.url);
-  const status = searchParams.get("status") || "ALL";
-  const reports = await getResourceReports(status);
-  return NextResponse.json({ success: true, data: reports });
-}
-
-export async function PATCH(request: Request) {
-  const session = await getSession();
-  if (!session || !hasModeratorAccess(session.role)) {
-    return NextResponse.json(
-      { success: false, error: { code: "FORBIDDEN", message: "Moderator access required." } },
-      { status: 403 }
-    );
-  }
-
-  const body = await request.json().catch(() => ({}));
-  if (!body.reportId) {
-    return NextResponse.json(
-      { success: false, error: { code: "VALIDATION_ERROR", message: "reportId is required." } },
-      { status: 400 }
-    );
-  }
-
-  const ok = await resolveResourceReport(body.reportId);
-  return NextResponse.json({ success: ok });
-}
-

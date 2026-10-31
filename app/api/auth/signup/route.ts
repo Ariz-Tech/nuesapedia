@@ -1,101 +1,119 @@
-import { NextResponse } from "next/server";
-import { createUser, findUserByEmail, initDb } from "@/lib/db";
-import { hashPassword, createSessionToken, COOKIE_NAME } from "@/lib/auth";
+import {
+  findUserByEmail,
+  createUser,
+} from "@/lib/db";
+import {
+  hashPassword,
+  createSessionToken,
+  sessionCookieOptions,
+} from "@/lib/auth";
 import { getRandomAvatar } from "@/lib/avatars";
+import { DEPARTMENTS } from "@/lib/departments";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { apiError, apiSuccess, validatePassword } from "@/lib/api-helpers";
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const VALID_LEVELS = ["100L", "200L", "300L", "400L", "500L"];
 
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
-    // 1. Rate limiting check (Max 5 signups per hour per IP)
-    const clientIp = getClientIp(request);
-    const rateLimit = checkRateLimit(`signup_${clientIp}`, {
-      intervalMs: 3600000,
-      maxRequests: 5,
+    const ip = getClientIp(req);
+    const rate = await checkRateLimit(`signup:${ip}`, {
+      limit: 5,
+      windowMs: 15 * 60 * 1000,
     });
-
-    if (!rateLimit.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Too many accounts created from this network. Please try again later.",
-        },
-        { status: 429 }
+    if (!rate.allowed) {
+      return apiError(
+        "RATE_LIMITED",
+        `Too many signup attempts. Please try again in ${rate.retryAfterSeconds} seconds.`,
+        429,
+        { "Retry-After": String(rate.retryAfterSeconds) }
       );
     }
 
-    await initDb();
-    const body = await request.json();
-    const { name, email, password, department, level, avatar } = body;
+    const body = await req.json();
+    const { name, email, password, department, level, avatar } = body ?? {};
 
-    if (!name || !email || !password || !department) {
-      return NextResponse.json(
-        { success: false, error: "Please fill in all required fields (Name, Email, Password, Department)." },
-        { status: 400 }
+    if (!name || !email || !password || !department || !level) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "All fields (name, email, password, department, level) are required.",
+        400
       );
     }
 
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanName = name.trim();
-    const cleanDepartment = department.trim();
-
-    if (!EMAIL_REGEX.test(cleanEmail)) {
-      return NextResponse.json(
-        { success: false, error: "Please provide a valid email address." },
-        { status: 400 }
+    const trimmedName = String(name).trim();
+    if (trimmedName.length < 2 || trimmedName.length > 100) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Name must be between 2 and 100 characters.",
+        400
       );
     }
 
-    // Password strength check (Minimum 8 chars, at least one letter and one number)
-    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Password must be at least 8 characters long and contain both letters and numbers.",
-        },
-        { status: 400 }
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(normalizedEmail) || normalizedEmail.length > 254) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Please enter a valid email address.",
+        400
       );
     }
 
-    // Check if user already exists
-    const existingUser = await findUserByEmail(cleanEmail);
-    if (existingUser) {
-      return NextResponse.json(
-        { success: false, error: "An account with this email already exists." },
-        { status: 409 }
+    const pwCheck = validatePassword(password);
+    if (!pwCheck.valid) {
+      return apiError("VALIDATION_ERROR", pwCheck.message!, 400);
+    }
+
+    if (!DEPARTMENTS.includes(department as (typeof DEPARTMENTS)[number])) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Please select a valid engineering department.",
+        400
       );
     }
 
-    // Assign a random avatar if not specified or roll one
-    const assignedAvatar = avatar || getRandomAvatar(cleanName);
+    if (!VALID_LEVELS.includes(String(level))) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Please select a valid academic level (100L - 500L).",
+        400
+      );
+    }
 
-    // Hash password securely with asynchronous non-blocking scrypt
-    const hashedPassword = await hashPassword(password);
+    const existing = await findUserByEmail(normalizedEmail);
+    if (existing) {
+      return apiError(
+        "EMAIL_EXISTS",
+        "An account with this email already exists.",
+        409
+      );
+    }
 
-    // Create user in backend
+    const hashedPassword = await hashPassword(String(password));
+    const userAvatar =
+      typeof avatar === "string" && avatar.startsWith("https://api.dicebear.com/")
+        ? avatar
+        : getRandomAvatar(trimmedName);
+
     const newUser = await createUser({
-      name: cleanName,
-      email: cleanEmail,
+      name: trimmedName,
+      email: normalizedEmail,
       password: hashedPassword,
-      department: cleanDepartment,
-      level: level ? level.trim() : "100L",
-      avatar: assignedAvatar,
-      role: "STUDENT",
+      department,
+      level: String(level),
+      avatar: userAvatar,
     });
 
-    // Create session token
     const token = createSessionToken({
-      id: newUser.id,
+      userId: newUser.id,
       email: newUser.email,
-      name: newUser.name,
       role: newUser.role,
+      sessionVersion: newUser.sessionVersion,
     });
 
-    const response = NextResponse.json(
+    const response = apiSuccess(
       {
-        success: true,
-        message: "Account created successfully",
         user: {
           id: newUser.id,
           name: newUser.name,
@@ -106,26 +124,17 @@ export async function POST(request: Request) {
           role: newUser.role,
         },
       },
-      { status: 201 }
+      201
     );
 
-    // Set HTTP-only session cookie
-    response.cookies.set({
-      name: COOKIE_NAME,
-      value: token,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 7 * 24 * 60 * 60, // 7 days
-    });
-
+    response.cookies.set(sessionCookieOptions(token));
     return response;
   } catch (error) {
     console.error("Signup error:", error);
-    return NextResponse.json(
-      { success: false, error: "An unexpected error occurred during signup." },
-      { status: 500 }
+    return apiError(
+      "INTERNAL_ERROR",
+      "Unable to create account right now. Please try again shortly.",
+      500
     );
   }
 }

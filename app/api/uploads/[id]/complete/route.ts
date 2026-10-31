@@ -1,82 +1,112 @@
-import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { getSubmissionById, updateSubmission, initDb } from "@/lib/db";
-import { getFileUrl } from "@/lib/r2";
-
-export const dynamic = "force-dynamic";
-
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+import {
+  getSubmissionById,
+  updateSubmission,
+  deleteSubmissionWithChecks,
+} from "@/lib/db";
+import {
+  isR2Configured,
+  verifyR2PdfObject,
+  deleteR2Object,
+  MAX_PDF_UPLOAD_BYTES,
+} from "@/lib/r2";
+import { mockR2Store } from "@/lib/mock-r2-store";
+import { apiError, apiSuccess, formatBytes } from "@/lib/api-helpers";
 
 /**
- * POST /api/uploads/:id/complete:
- * Flow 3, Step 4 & API Spec Section 16.1
- * Informs the platform that direct file upload to Cloudflare R2 has succeeded
+ * POST /api/uploads/:id/complete
+ * Verifies the uploaded PDF object exists in storage, respects the 30MB cap,
+ * and carries a valid `%PDF-` signature before promoting `UPLOADING -> PENDING_REVIEW`.
  */
-export async function POST(request: Request, { params }: RouteParams) {
+export async function POST(
+  req: Request,
+  context: { params: Promise<{ id: string }> }
+) {
   try {
     const session = await getSession();
     if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Not authenticated" },
-        { status: 401 }
-      );
+      return apiError("UNAUTHORIZED", "Authentication required.", 401);
     }
 
-    const { id: uploadId } = await params;
-    if (!uploadId) {
-      return NextResponse.json(
-        { success: false, error: "Upload ID is required" },
-        { status: 400 }
-      );
-    }
+    const { id } = await context.params;
+    const submission = await getSubmissionById(id);
 
-    await initDb();
-
-    const submission = await getSubmissionById(uploadId);
     if (!submission) {
-      return NextResponse.json(
-        { success: false, error: "Upload record not found" },
-        { status: 404 }
+      return apiError("NOT_FOUND", "Upload session not found.", 404);
+    }
+
+    if (
+      submission.userId !== session.userId &&
+      session.role !== "ADMIN" &&
+      session.role !== "MODERATOR"
+    ) {
+      return apiError(
+        "FORBIDDEN",
+        "You do not own this upload session.",
+        403
       );
     }
 
-    if (submission.userId !== session.userId) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized access to this upload" },
-        { status: 403 }
+    const body = await req.json().catch(() => ({}));
+    const targetKey = submission.r2Key || (typeof body?.r2Key === "string" ? body.r2Key : undefined);
+
+    if (!targetKey) {
+      return apiError("VALIDATION_ERROR", "Missing storage object key.", 400);
+    }
+
+    let verifiedBytes: number | null = submission.fileSizeBytes ?? null;
+
+    if (isR2Configured) {
+      const check = await verifyR2PdfObject(targetKey, MAX_PDF_UPLOAD_BYTES);
+      if (!check.valid) {
+        await deleteR2Object(targetKey);
+        await deleteSubmissionWithChecks(
+          { userId: session.userId, role: "ADMIN" },
+          id
+        );
+        return apiError(
+          "INVALID_UPLOAD",
+          check.error || "Uploaded file failed PDF verification.",
+          400
+        );
+      }
+      verifiedBytes = check.sizeBytes ?? verifiedBytes;
+    } else if (process.env.NODE_ENV !== "production") {
+      const mockObj = mockR2Store.get(targetKey);
+      if (!mockObj) {
+        await deleteSubmissionWithChecks(
+          { userId: session.userId, role: "ADMIN" },
+          id
+        );
+        return apiError(
+          "UPLOAD_INCOMPLETE",
+          "Uploaded file was not received by local mock storage.",
+          400
+        );
+      }
+      verifiedBytes = mockObj.sizeBytes;
+    } else {
+      return apiError(
+        "STORAGE_UNCONFIGURED",
+        "Object storage is not configured.",
+        503
       );
     }
 
-    // Resolve final permanent/pre-signed download URL from Cloudflare R2
-    let fileUrl = submission.fileUrl;
-    if (submission.r2Key) {
-      const liveR2Url = await getFileUrl(submission.r2Key);
-      if (liveR2Url) fileUrl = liveR2Url;
-    }
-
-    // Update submission status to PENDING_REVIEW
-    const updated = await updateSubmission(uploadId, {
-      status: "PENDING_REVIEW",
-      fileUrl,
+    const updated = await updateSubmission(id, {
+      r2Key: targetKey,
+      fileUrl: `/api/resources/${id}/view`,
+      fileSizeBytes: verifiedBytes,
+      fileSize: verifiedBytes ? formatBytes(verifiedBytes) : submission.fileSize,
+      status: submission.status === "APPROVED" ? "APPROVED" : "PENDING_REVIEW",
     });
 
-    return NextResponse.json({
-      success: true,
-      message: "Direct Cloudflare R2 upload confirmed and submitted for faculty moderation.",
-      data: {
-        uploadId,
-        resourceId: uploadId,
-        status: "PENDING_MODERATION",
-        submission: updated,
-      },
+    return apiSuccess({
+      submission: updated,
+      message: "Upload verified and queued for moderation.",
     });
   } catch (error) {
-    console.error("Upload completion error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to confirm upload completion." },
-      { status: 500 }
-    );
+    console.error("POST /api/uploads/[id]/complete error:", error);
+    return apiError("INTERNAL_ERROR", "Failed to finalize upload.", 500);
   }
 }

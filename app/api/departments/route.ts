@@ -1,55 +1,30 @@
-import { NextResponse } from "next/server";
-import { DEPARTMENT_DETAILS } from "@/lib/departments";
-import { COURSE_REGISTRY } from "@/lib/courses";
-import { getApprovedResourcesPaginated } from "@/lib/db";
+import { DEPARTMENT_RECORDS } from "@/lib/departments";
+import { getApprovedCourses } from "@/lib/db";
+import { apiError, apiSuccess } from "@/lib/api-helpers";
 
-export const dynamic = "force-dynamic";
-
-/**
- * GET /api/departments
- * Lists all 5 engineering departments with course & resource counts (docs/API_SPEC.md §9)
- */
 export async function GET() {
   try {
-    const allCourses = Object.values(COURSE_REGISTRY);
-    const { resources } = await getApprovedResourcesPaginated({ limit: 1000 });
+    const courses = await getApprovedCourses();
 
-    const data = DEPARTMENT_DETAILS.map((dept) => {
-      const courseCount = allCourses.filter(
+    const departments = DEPARTMENT_RECORDS.map((dept) => {
+      const deptCourses = courses.filter(
         (c) => c.department.toLowerCase() === dept.name.toLowerCase()
-      ).length;
-      const resourceCount = resources.filter(
-        (r) => r.department.toLowerCase() === dept.name.toLowerCase()
-      ).length;
+      );
+      const resourceCount = deptCourses.reduce(
+        (sum, c) => sum + (c.resourceCount || 0),
+        0
+      );
 
       return {
-        id: dept.slug,
-        code: dept.code,
-        name: dept.name,
-        shortName: dept.shortName,
-        slug: dept.slug,
-        description: dept.description,
-        courseCount,
+        ...dept,
+        courseCount: deptCourses.length,
         resourceCount,
       };
     });
 
-    return NextResponse.json({
-      success: true,
-      data,
-    });
+    return apiSuccess({ departments });
   } catch (error) {
     console.error("GET /api/departments error:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "Failed to fetch departments.",
-        },
-      },
-      { status: 500 }
-    );
+    return apiError("INTERNAL_ERROR", "Failed to load departments.", 500);
   }
 }
-

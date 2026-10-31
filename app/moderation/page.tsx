@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import Navbar from "@/components/Navbar";
@@ -12,21 +12,19 @@ import {
   XCircle,
   FileText,
   Clock,
-  Filter,
   Search,
   ExternalLink,
   Loader2,
   Users,
-  Check,
   AlertTriangle,
   ArrowRight,
   RefreshCw,
   Eye,
   MessageSquare,
-  BookOpen,
   Flag,
 } from "lucide-react";
 import { DEPARTMENTS } from "@/lib/departments";
+import { extractApiError } from "@/lib/api-helpers";
 
 function YoutubeIcon({ className = "w-4 h-4" }: { className?: string }) {
   return (
@@ -161,11 +159,10 @@ export default function ModerationPortalPage() {
       .finally(() => setLoadingAuth(false));
   }, []);
 
-  // Fetch submissions when authorized
-  const fetchSubmissions = async () => {
+  const fetchSubmissions = useCallback(async () => {
+    setQueueLoading(true);
     try {
-      setQueueLoading(true);
-      const res = await fetch(`/api/moderation?status=ALL`);
+      const res = await fetch(`/api/moderation?status=ALL`, { cache: "no-store" });
       const data = await res.json();
       if (res.ok && data.success) {
         setSubmissions(data.submissions || []);
@@ -175,53 +172,39 @@ export default function ModerationPortalPage() {
     } finally {
       setQueueLoading(false);
     }
-  };
+  }, []);
 
-  // Fetch users when on users tab (Admin only)
-  const fetchUsers = async () => {
+  const fetchRequests = useCallback(async () => {
+    setRequestsLoading(true);
     try {
-      setUsersLoading(true);
-      const res = await fetch("/api/admin/users");
+      const res = await fetch("/api/requests?status=ALL", { cache: "no-store" });
       const data = await res.json();
       if (res.ok && data.success) {
-        setUsersList(data.users || []);
-      }
-    } catch (err) {
-      console.error("Failed to fetch users list:", err);
-    } finally {
-      setUsersLoading(false);
-    }
-  };
-
-  const fetchRequests = async () => {
-    try {
-      setRequestsLoading(true);
-      const res = await fetch("/api/requests?status=ALL");
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setMaterialRequests(data.data || []);
+        setMaterialRequests(data.requests || data.data || []);
       }
     } catch (err) {
       console.error("Failed to fetch material requests:", err);
     } finally {
       setRequestsLoading(false);
     }
-  };
+  }, []);
 
-  const fetchReports = async () => {
+  const fetchReports = useCallback(async () => {
+    setReportsLoading(true);
     try {
-      setReportsLoading(true);
-      const res = await fetch("/api/resources/all/report?status=ALL");
+      const res = await fetch("/api/moderation/reports?status=ALL", {
+        cache: "no-store",
+      });
       const data = await res.json();
       if (res.ok && data.success) {
-        setResourceReports(data.data || []);
+        setResourceReports(data.reports || data.data || []);
       }
     } catch (err) {
       console.error("Failed to fetch resource reports:", err);
     } finally {
       setReportsLoading(false);
     }
-  };
+  }, []);
 
   const handleToggleRequestStatus = async (id: string, status: "OPEN" | "FULFILLED") => {
     try {
@@ -243,7 +226,7 @@ export default function ModerationPortalPage() {
 
   const handleResolveReport = async (reportId: string) => {
     try {
-      const res = await fetch("/api/resources/all/report", {
+      const res = await fetch("/api/moderation/reports", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reportId }),
@@ -259,18 +242,90 @@ export default function ModerationPortalPage() {
   };
 
   useEffect(() => {
-    if (currentUser && (currentUser.role === "MODERATOR" || currentUser.role === "ADMIN")) {
-      fetchSubmissions();
-      fetchRequests();
-      fetchReports();
+    if (!currentUser || (currentUser.role !== "MODERATOR" && currentUser.role !== "ADMIN")) {
+      return;
     }
+
+    let active = true;
+    async function loadPortalData() {
+      try {
+        const [modRes, reqRes, repRes] = await Promise.all([
+          fetch("/api/moderation?status=ALL", { cache: "no-store" }),
+          fetch("/api/requests?status=ALL", { cache: "no-store" }),
+          fetch("/api/moderation/reports?status=ALL", { cache: "no-store" }),
+        ]);
+
+        const [modData, reqData, repData] = await Promise.all([
+          modRes.ok ? modRes.json().catch(() => null) : null,
+          reqRes.ok ? reqRes.json().catch(() => null) : null,
+          repRes.ok ? repRes.json().catch(() => null) : null,
+        ]);
+
+        if (!active) return;
+
+        if (modData?.success) {
+          setSubmissions(modData.submissions || []);
+        }
+        if (reqData?.success) {
+          setMaterialRequests(reqData.requests || reqData.data || []);
+        }
+        if (repData?.success) {
+          setResourceReports(repData.reports || repData.data || []);
+        }
+      } catch (err) {
+        console.error("Failed to load moderation portal data:", err);
+      } finally {
+        if (active) {
+          setQueueLoading(false);
+          setRequestsLoading(false);
+          setReportsLoading(false);
+        }
+      }
+    }
+
+    void loadPortalData();
+    return () => {
+      active = false;
+    };
   }, [currentUser]);
 
   useEffect(() => {
-    if (activePortalTab === "users" && currentUser?.role === "ADMIN") {
-      fetchUsers();
+    if (activePortalTab !== "users" || currentUser?.role !== "ADMIN") {
+      return;
     }
+
+    let active = true;
+    async function loadUsers() {
+      try {
+        const res = await fetch("/api/admin/users", { cache: "no-store" });
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        if (active && data?.success) {
+          setUsersList(data.users || []);
+        }
+      } catch (err) {
+        console.error("Failed to fetch users list:", err);
+      } finally {
+        if (active) {
+          setUsersLoading(false);
+        }
+      }
+    }
+
+    void loadUsers();
+    return () => {
+      active = false;
+    };
   }, [activePortalTab, currentUser]);
+
+  // Escape key closes rejection dialog
+  useEffect(() => {
+    if (!rejectingItem) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRejectingItem(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [rejectingItem]);
 
   // Handle Approve Action
   const handleApprove = async (submissionId: string) => {
@@ -288,7 +343,7 @@ export default function ModerationPortalPage() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        throw new Error(data.error || "Failed to approve resource.");
+        throw new Error(extractApiError(data, "Failed to approve resource."));
       }
 
       setSubmissions((prev) =>
@@ -332,7 +387,7 @@ export default function ModerationPortalPage() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        throw new Error(data.error || "Failed to reject resource.");
+        throw new Error(extractApiError(data, "Failed to reject resource."));
       }
 
       setSubmissions((prev) =>
@@ -368,7 +423,7 @@ export default function ModerationPortalPage() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        throw new Error(data.error || "Failed to update role.");
+        throw new Error(extractApiError(data, "Failed to update role."));
       }
 
       setUsersList((prev) =>
@@ -943,7 +998,11 @@ export default function ModerationPortalPage() {
                     <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
                       {/* Inspect File Link */}
                       <a
-                        href={sub.fileUrl || sub.youtubeUrl}
+                        href={
+                          sub.medium === "PDF"
+                            ? `/api/resources/${encodeURIComponent(sub.id)}/view`
+                            : sub.youtubeUrl || sub.fileUrl
+                        }
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#00875A] hover:text-[#00734c] transition-colors"
@@ -1294,19 +1353,28 @@ export default function ModerationPortalPage() {
 
       {/* REJECTION REASON MODAL */}
       {rejectingItem && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reject-modal-title"
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+        >
           <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl animate-in zoom-in-95">
             <div className="flex items-start justify-between gap-4 mb-4">
               <div>
                 <span className="text-[11px] font-extrabold uppercase px-2 py-0.5 rounded bg-rose-100 text-rose-800">
                   Moderator Action
                 </span>
-                <h3 className="text-lg font-bold text-slate-900 mt-1">
+                <h3
+                  id="reject-modal-title"
+                  className="text-lg font-bold text-slate-900 mt-1"
+                >
                   Reject Resource Submission
                 </h3>
               </div>
               <button
                 type="button"
+                aria-label="Close rejection dialog"
                 onClick={() => setRejectingItem(null)}
                 className="text-slate-400 hover:text-slate-700 cursor-pointer text-lg font-bold"
               >
@@ -1341,10 +1409,14 @@ export default function ModerationPortalPage() {
 
             {/* Textarea */}
             <div className="mb-6">
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+              <label
+                htmlFor="rejection-reason-textarea"
+                className="block text-xs font-semibold text-slate-700 mb-1.5"
+              >
                 Specific Feedback to Contributor <span className="text-rose-500">*</span>
               </label>
               <textarea
+                id="rejection-reason-textarea"
                 rows={3}
                 required
                 value={rejectionReasonText}

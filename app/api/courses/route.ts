@@ -1,78 +1,48 @@
-import { NextResponse } from "next/server";
 import { getApprovedCourses } from "@/lib/db";
+import { apiError, apiSuccess } from "@/lib/api-helpers";
 
-export const dynamic = "force-dynamic";
-
-/**
- * GET /api/courses
- * Returns verified engineering courses derived exclusively from approved database records.
- */
-export async function GET(request: Request) {
+export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(request.url);
+    const { searchParams } = new URL(req.url);
     const department = searchParams.get("department");
     const level = searchParams.get("level");
     const semester = searchParams.get("semester");
-    const query = (searchParams.get("q") || "").trim().toLowerCase();
+    const query = searchParams.get("q")?.trim().toLowerCase();
 
-    const courses = await getApprovedCourses();
+    let courses = await getApprovedCourses();
 
-    const filtered = courses.filter((course) => {
-      if (
-        department &&
-        department !== "All" &&
-        department !== "All Departments" &&
-        course.department.toLowerCase() !== department.toLowerCase()
-      ) {
-        return false;
-      }
+    if (department && department !== "ALL" && department !== "All") {
+      courses = courses.filter(
+        (c) => c.department.toLowerCase() === department.toLowerCase()
+      );
+    }
 
-      if (
-        level &&
-        level !== "All Levels" &&
-        course.level.toLowerCase() !== level.toLowerCase()
-      ) {
-        return false;
-      }
+    if (level && level !== "ALL" && level !== "All") {
+      courses = courses.filter(
+        (c) => c.level.toLowerCase() === level.toLowerCase()
+      );
+    }
 
-      if (
-        semester &&
-        semester !== "All Semesters" &&
-        course.semester.toLowerCase() !== semester.toLowerCase()
-      ) {
-        return false;
-      }
+    if (semester && semester !== "ALL" && semester !== "All") {
+      courses = courses.filter(
+        (c) => c.semester.toLowerCase() === semester.toLowerCase()
+      );
+    }
 
-      if (query) {
-        const matchesCode = course.code.toLowerCase().includes(query);
-        const matchesTitle = course.title.toLowerCase().includes(query);
-        const matchesDesc = (course.description || "").toLowerCase().includes(query);
-        const matchesDept = course.department.toLowerCase().includes(query);
-        if (!matchesCode && !matchesTitle && !matchesDesc && !matchesDept) {
-          return false;
-        }
-      }
+    if (query) {
+      courses = courses.filter(
+        (c) =>
+          c.code.toLowerCase().includes(query) ||
+          c.title.toLowerCase().includes(query)
+      );
+    }
 
-      return true;
+    return apiSuccess({
+      total: courses.length,
+      courses,
     });
-
-    return NextResponse.json(
-      {
-        success: true,
-        courses: filtered,
-        count: filtered.length,
-      },
-      {
-        headers: {
-          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
-        },
-      }
-    );
   } catch (error) {
-    console.error("Failed to fetch verified courses:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch verified courses from database." },
-      { status: 500 }
-    );
+    console.error("GET /api/courses error:", error);
+    return apiError("INTERNAL_ERROR", "Failed to load courses.", 500);
   }
 }

@@ -1,28 +1,29 @@
-import { NextResponse } from "next/server";
 import { checkDatabaseHealth } from "@/lib/db";
-import { isR2Configured } from "@/lib/r2";
+import { checkR2Health } from "@/lib/r2";
+import { NextResponse } from "next/server";
 
-export const dynamic = "force-dynamic";
-
-/**
- * GET /api/health
- * Health check endpoint per docs/API_SPEC.md §50
- */
 export async function GET() {
-  const dbHealth = await checkDatabaseHealth();
+  const [dbHealth, r2Health] = await Promise.all([
+    checkDatabaseHealth(),
+    checkR2Health(),
+  ]);
 
-  return NextResponse.json({
-    success: true,
-    data: {
-      status: "ok",
-      service: "The NUESA Library API",
-      version: "1.0.0",
-      database: dbHealth,
-      storage: {
-        r2Configured: isR2Configured(),
-      },
+  const storageOk =
+    process.env.NODE_ENV === "production"
+      ? r2Health.configured && r2Health.reachable
+      : r2Health.reachable;
+  const healthy = dbHealth.connected && storageOk;
+
+  return NextResponse.json(
+    {
+      success: healthy,
+      status: healthy ? "healthy" : "degraded",
       timestamp: new Date().toISOString(),
+      services: {
+        database: dbHealth,
+        storage: r2Health,
+      },
     },
-  });
+    { status: healthy ? 200 : 503 }
+  );
 }
-

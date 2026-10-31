@@ -1,69 +1,76 @@
-import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { addSavedResource, getSavedResources, removeSavedResource } from "@/lib/db";
+import {
+  getSavedResources,
+  addSavedResource,
+  removeSavedResource,
+} from "@/lib/db";
+import { apiError, apiSuccess } from "@/lib/api-helpers";
 
 export async function GET() {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-  }
-
-  const items = await getSavedResources(session.userId);
-  return NextResponse.json({ success: true, data: items });
-}
-
-export async function POST(request: Request) {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
-    const body = await request.json();
-    const { resourceId, title, courseCode, department, type, fileSize } = body;
-
-    if (!resourceId || !title || !courseCode || !department) {
-      return NextResponse.json(
-        { success: false, error: "Missing required resource details" },
-        { status: 400 }
-      );
+    const session = await getSession();
+    if (!session) {
+      return apiError("UNAUTHORIZED", "Not authenticated.", 401);
     }
 
-    const saved = await addSavedResource({
-      userId: session.userId,
-      resourceId,
-      title,
-      courseCode,
-      department,
-      type,
-      fileSize,
-    });
-
-    return NextResponse.json({ success: true, data: saved });
+    const saved = await getSavedResources(session.userId);
+    return apiSuccess({ saved });
   } catch (error) {
-    console.error("Save resource error:", error);
-    return NextResponse.json({ success: false, error: "Failed to save resource" }, { status: 500 });
+    console.error("Get saved resources error:", error);
+    return apiError("INTERNAL_ERROR", "Internal server error.", 500);
   }
 }
 
-export async function DELETE(request: Request) {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-  }
-
+export async function POST(req: Request) {
   try {
-    const { searchParams } = new URL(request.url);
+    const session = await getSession();
+    if (!session) {
+      return apiError("UNAUTHORIZED", "Not authenticated.", 401);
+    }
+
+    const body = await req.json();
+    const { resourceId, title, courseCode, department, type, fileSize } =
+      body ?? {};
+
+    if (!resourceId || !title || !courseCode || !department || !type) {
+      return apiError("VALIDATION_ERROR", "Missing resource metadata.", 400);
+    }
+
+    const item = await addSavedResource({
+      userId: session.userId,
+      resourceId: String(resourceId),
+      title: String(title).slice(0, 255),
+      courseCode: String(courseCode).slice(0, 50),
+      department: String(department).slice(0, 255),
+      type: String(type).slice(0, 100),
+      fileSize: fileSize ? String(fileSize).slice(0, 50) : "PDF Document",
+    });
+
+    return apiSuccess({ saved: item }, 201);
+  } catch (error) {
+    console.error("Add saved resource error:", error);
+    return apiError("INTERNAL_ERROR", "Internal server error.", 500);
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return apiError("UNAUTHORIZED", "Not authenticated.", 401);
+    }
+
+    const { searchParams } = new URL(req.url);
     const resourceId = searchParams.get("resourceId");
 
     if (!resourceId) {
-      return NextResponse.json({ success: false, error: "resourceId required" }, { status: 400 });
+      return apiError("VALIDATION_ERROR", "resourceId is required.", 400);
     }
 
     await removeSavedResource(session.userId, resourceId);
-    return NextResponse.json({ success: true, message: "Resource removed" });
+    return apiSuccess({ removed: true });
   } catch (error) {
-    console.error("Remove resource error:", error);
-    return NextResponse.json({ success: false, error: "Failed to remove resource" }, { status: 500 });
+    console.error("Remove saved resource error:", error);
+    return apiError("INTERNAL_ERROR", "Internal server error.", 500);
   }
 }

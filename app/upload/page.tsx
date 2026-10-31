@@ -1,39 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import ResourceUploadPortal, { DbSubmission } from "@/components/ResourceUploadPortal";
+import ResourceUploadPortal from "@/components/ResourceUploadPortal";
 import { Loader2, ArrowLeft } from "lucide-react";
 import Link from "next/link";
-
-interface AuthUser {
-  id: string;
-  name: string;
-  email: string;
-  department: string;
-  level: string;
-}
+import { useAuth } from "@/context/AuthContext";
 
 export default function UploadPage() {
   const router = useRouter();
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, loading } = useAuth();
 
   useEffect(() => {
-    fetch("/api/auth/me")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.success && data?.user) {
-          setUser(data.user);
-        } else {
-          router.push("/login?redirect=/upload");
-        }
-      })
-      .catch(() => router.push("/login?redirect=/upload"))
-      .finally(() => setLoading(false));
-  }, [router]);
+    if (!loading && !user) {
+      router.replace("/login?redirect=/upload");
+    }
+  }, [loading, user, router]);
 
   if (loading) {
     return (

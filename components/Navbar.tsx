@@ -7,9 +7,9 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { BookOpen, Menu, X, User as UserIcon, ShieldCheck, Search } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useSavedResources } from "@/context/SavedResourcesContext";
-import { COURSE_REGISTRY } from "@/lib/courses";
+import { COURSE_REGISTRY, type CourseMetadata } from "@/lib/courses";
 
-const ALL_COURSES = Object.values(COURSE_REGISTRY);
+const STATIC_COURSES: CourseMetadata[] = Object.values(COURSE_REGISTRY);
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -26,6 +26,7 @@ export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [navQuery, setNavQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+  const [dynamicCourses, setDynamicCourses] = useState<CourseMetadata[] | null>(null);
   const desktopSearchRef = useRef<HTMLDivElement>(null);
 
   const isResourcesActive = pathname === "/resources" || pathname?.startsWith("/resources/");
@@ -41,11 +42,36 @@ export default function Navbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Load dynamic DB courses on first search interaction so newly uploaded courses appear in autocomplete
+  useEffect(() => {
+    if (!searchFocused || dynamicCourses !== null) return;
+    let active = true;
+    fetch("/api/courses")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && Array.isArray(data?.courses)) {
+          setDynamicCourses(data.courses);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [searchFocused, dynamicCourses]);
+
+  const allCourses = useMemo(() => {
+    if (!dynamicCourses) return STATIC_COURSES;
+    const merged = new Map<string, CourseMetadata>();
+    for (const c of STATIC_COURSES) merged.set(c.code.toUpperCase(), c);
+    for (const c of dynamicCourses) merged.set(c.code.toUpperCase(), c);
+    return Array.from(merged.values());
+  }, [dynamicCourses]);
+
   const matchingCourses = useMemo(() => {
     const q = navQuery.trim().toLowerCase();
     if (!q) return [];
     const compactQ = q.replace(/\s+/g, "");
-    return ALL_COURSES.filter((c) => {
+    return allCourses.filter((c) => {
       const codeLower = c.code.toLowerCase();
       const compactCode = codeLower.replace(/\s+/g, "");
       const titleLower = c.title.toLowerCase();
@@ -55,7 +81,7 @@ export default function Navbar() {
         titleLower.includes(q)
       );
     }).slice(0, 6);
-  }, [navQuery]);
+  }, [navQuery, allCourses]);
 
   const submitSearch = (term: string) => {
     const trimmed = term.trim();

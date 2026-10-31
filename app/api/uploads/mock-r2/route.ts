@@ -1,73 +1,107 @@
-import { NextResponse } from "next/server";
-
-export const dynamic = "force-dynamic";
-
-// In-memory mock storage with LRU size limits to prevent V8 heap OOM
-const MAX_MOCK_ENTRIES = 10;
-const MAX_TOTAL_BYTES = 50 * 1024 * 1024; // 50MB
-const mockR2Store = new Map<string, { buffer: ArrayBuffer; contentType: string; size: number }>();
-
-function evictIfNecessary(incomingSize: number) {
-  let currentBytes = 0;
-  for (const item of mockR2Store.values()) {
-    currentBytes += item.size;
-  }
-
-  while (mockR2Store.size >= MAX_MOCK_ENTRIES || currentBytes + incomingSize > MAX_TOTAL_BYTES) {
-    const oldestKey = mockR2Store.keys().next().value;
-    if (!oldestKey) break;
-    const removed = mockR2Store.get(oldestKey);
-    if (removed) currentBytes -= removed.size;
-    mockR2Store.delete(oldestKey);
-  }
-}
+import { getSession } from "@/lib/auth";
+import { isR2Configured, MAX_PDF_UPLOAD_BYTES } from "@/lib/r2";
+import { apiError, apiSuccess } from "@/lib/api-helpers";
+import { mockR2Store } from "@/lib/mock-r2-store";
 
 /**
- * PUT: Receives direct file stream from client browser mimicking Cloudflare R2
+ * Local development-only R2 mock storage.
+ * Strictly disabled in production or whenever real Cloudflare R2 is configured.
+ * Enforces authentication, PDF magic-byte verification, size limits, and sandboxed headers.
  */
-export async function PUT(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const key = searchParams.get("key") || `mock_${Date.now()}.pdf`;
-    const contentType = request.headers.get("content-type") || "application/pdf";
 
-    const arrayBuffer = await request.arrayBuffer();
-    evictIfNecessary(arrayBuffer.byteLength);
-
-    mockR2Store.set(key, { buffer: arrayBuffer, contentType, size: arrayBuffer.byteLength });
-
-    return new NextResponse(null, {
-      status: 200,
-      headers: {
-        "ETag": `"mock-etag-${Date.now()}"`,
-        "Access-Control-Allow-Origin": "*",
-      },
-    });
-  } catch (error) {
-    console.error("Mock R2 upload error:", error);
-    return NextResponse.json({ error: "Failed to process mock upload" }, { status: 500 });
-  }
+function isMockAllowed(): boolean {
+  return process.env.NODE_ENV !== "production" && !isR2Configured;
 }
 
-/**
- * GET: Serves the mock file
- */
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const key = searchParams.get("key") || "";
-  const isDownload = searchParams.get("download") === "1";
-  const rawName = searchParams.get("filename") || "document.pdf";
-  const safeName = rawName.replace(/[^a-zA-Z0-9._-]/g, "_");
+function isSafeStorageKey(key: string | null): key is string {
+  if (!key) return false;
+  return (
+    key.startsWith("uploads/") &&
+    !key.includes("..") &&
+    !key.includes("\\") &&
+    key.length <= 300
+  );
+}
+
+export async function PUT(req: Request) {
+  if (!isMockAllowed()) {
+    return apiError("NOT_FOUND", "Endpoint not available.", 404);
+  }
+
+  const session = await getSession();
+  if (!session) {
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  const { searchParams } = new URL(req.url);
+  const key = searchParams.get("key");
+  if (!isSafeStorageKey(key)) {
+    return apiError("INVALID_KEY", "Invalid storage key.", 400);
+  }
+
+  const arrayBuffer = await req.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_PDF_UPLOAD_BYTES) {
+    return apiError(
+      "FILE_SIZE_INVALID",
+      "File must be non-empty and at most 30MB.",
+      413
+    );
+  }
+
+  if (
+    bytes.byteLength < 5 ||
+    Buffer.from(bytes.slice(0, 5)).toString("ascii") !== "%PDF-"
+  ) {
+    return apiError(
+      "INVALID_FILE_TYPE",
+      "Only valid PDF documents (%PDF-) are accepted.",
+      415
+    );
+  }
+
+  mockR2Store.set(key, {
+    bytes,
+    sizeBytes: bytes.byteLength,
+    uploadedBy: session.userId,
+    createdAt: Date.now(),
+  });
+
+  return apiSuccess({ key, sizeBytes: bytes.byteLength });
+}
+
+export async function GET(req: Request) {
+  if (!isMockAllowed()) {
+    return apiError("NOT_FOUND", "Endpoint not available.", 404);
+  }
+
+  const session = await getSession();
+  if (!session) {
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  const { searchParams } = new URL(req.url);
+  const key = searchParams.get("key");
+  if (!isSafeStorageKey(key)) {
+    return apiError("INVALID_KEY", "Invalid storage key.", 400);
+  }
 
   const stored = mockR2Store.get(key);
   if (!stored) {
-    return new NextResponse("File not found in local mock R2 store", { status: 404 });
+    return apiError("NOT_FOUND", "Mock storage object not found.", 404);
   }
 
-  return new NextResponse(stored.buffer, {
+  const safeBody = new Uint8Array(stored.bytes);
+  return new Response(safeBody, {
+    status: 200,
     headers: {
-      "Content-Type": stored.contentType,
-      "Content-Disposition": `${isDownload ? "attachment" : "inline"}; filename="${safeName}"`,
+      "Content-Type": "application/pdf",
+      "Content-Length": String(stored.sizeBytes),
+      "Content-Disposition": 'inline; filename="document.pdf"',
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Cache-Control": "private, no-store",
     },
   });
 }

@@ -1,96 +1,62 @@
-import { NextResponse } from "next/server";
-import { hashPassword } from "@/lib/auth";
-import { findUserByEmail, initDb, updateUserPassword } from "@/lib/db";
+import { consumePasswordResetToken } from "@/lib/db";
+import { hashPassword, hashResetToken } from "@/lib/auth";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { apiError, apiSuccess, validatePassword } from "@/lib/api-helpers";
 
-export const dynamic = "force-dynamic";
-
-export async function POST(request: Request) {
+/**
+ * POST /api/auth/reset-password
+ * Completes password reset using a cryptographic single-use token,
+ * revoking all prior sessions by incrementing `session_version`.
+ */
+export async function POST(req: Request) {
   try {
-    const ip = getClientIp(request);
-    const rate = checkRateLimit(`pwd_reset:${ip}`, {
-      intervalMs: 900000,
-      maxRequests: 6,
+    const ip = getClientIp(req);
+    const rl = await checkRateLimit(`pwd_reset:${ip}`, {
+      limit: 6,
+      windowMs: 15 * 60 * 1000,
     });
-    if (!rate.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: "RATE_LIMITED",
-            message: "Too many reset attempts. Please wait 15 minutes and try again.",
-          },
-        },
-        { status: 429 }
+    if (!rl.allowed) {
+      return apiError(
+        "RATE_LIMITED",
+        `Too many password reset attempts. Please wait ${rl.retryAfterSeconds} seconds.`,
+        429,
+        { "Retry-After": String(rl.retryAfterSeconds) }
       );
     }
 
-    const body = await request.json().catch(() => ({}));
-    const { email, department, level, newPassword } = body;
+    const body = await req.json();
+    const { token, newPassword } = body ?? {};
 
-    if (!email?.trim() || !department?.trim() || !level?.trim() || !newPassword) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "Email, department, academic level, and new password are required.",
-          },
-        },
-        { status: 400 }
+    if (!token || typeof token !== "string" || !/^[a-f0-9]{64}$/i.test(token.trim())) {
+      return apiError(
+        "INVALID_TOKEN",
+        "Invalid or expired password reset link. Please request a new reset email.",
+        400
       );
     }
 
-    if (typeof newPassword !== "string" || newPassword.length < 6) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "New password must be at least 6 characters long.",
-          },
-        },
-        { status: 400 }
+    const pwCheck = validatePassword(newPassword);
+    if (!pwCheck.valid) {
+      return apiError("VALIDATION_ERROR", pwCheck.message!, 400);
+    }
+
+    const tokenHash = hashResetToken(token.trim());
+    const hashedPassword = await hashPassword(String(newPassword));
+    const updatedUser = await consumePasswordResetToken(tokenHash, hashedPassword);
+
+    if (!updatedUser) {
+      return apiError(
+        "INVALID_OR_EXPIRED_TOKEN",
+        "This password reset link has expired or has already been used. Please request a new one.",
+        400
       );
     }
 
-    await initDb();
-    const user = await findUserByEmail(email.trim());
-
-    if (
-      !user ||
-      user.department.toLowerCase() !== department.trim().toLowerCase() ||
-      user.level.toUpperCase() !== level.trim().toUpperCase()
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: "VERIFICATION_FAILED",
-            message:
-              "Could not verify account details. Ensure your email, department, and level match your registered profile.",
-          },
-        },
-        { status: 400 }
-      );
-    }
-
-    const hashed = await hashPassword(newPassword);
-    await updateUserPassword(user.id, hashed);
-
-    return NextResponse.json({
-      success: true,
-      message: "Password reset successfully. You can now sign in with your new password.",
+    return apiSuccess({
+      message: "Your password has been reset successfully. You may now sign in.",
     });
   } catch (error) {
     console.error("POST /api/auth/reset-password error:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: { code: "INTERNAL_ERROR", message: "Failed to reset password." },
-      },
-      { status: 500 }
-    );
+    return apiError("INTERNAL_ERROR", "Unable to reset password.", 500);
   }
 }
-

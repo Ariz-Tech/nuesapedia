@@ -1,85 +1,90 @@
 import { NextResponse } from "next/server";
-import { getResourceById, initDb } from "@/lib/db";
-import { getSignedViewUrl, isR2Configured } from "@/lib/r2";
-
-export const dynamic = "force-dynamic";
-
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+import { getSession } from "@/lib/auth";
+import { getResourceById, canAccessSubmission } from "@/lib/db";
+import { getSignedDownloadUrl } from "@/lib/r2";
+import { apiError, apiSuccess } from "@/lib/api-helpers";
 
 /**
  * GET /api/resources/:id/view
- * Returns a view/stream URL for in-browser reading or playback (docs/API_SPEC.md §12.2)
+ * Enforces moderation status and redirects (`302`) to a freshly minted 15-minute `inline`
+ * signed URL (or returns JSON when `?format=json`), preventing expired S3 URL failures.
  */
-export async function GET(request: Request, { params }: RouteParams) {
+export async function GET(
+  req: Request,
+  context: { params: Promise<{ id: string }> }
+) {
   try {
-    const { id } = await params;
-    await initDb();
+    const { id } = await context.params;
     const resource = await getResourceById(id);
 
     if (!resource) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: "RESOURCE_NOT_FOUND",
-            message: `No resource found with ID '${id}'.`,
-          },
-        },
-        { status: 404 }
-      );
+      return apiError("NOT_FOUND", "Resource not found.", 404);
+    }
+
+    const session = await getSession();
+    if (!canAccessSubmission(resource, session)) {
+      return apiError("NOT_FOUND", "Resource not found.", 404);
+    }
+
+    const { searchParams } = new URL(req.url);
+    const wantsJson = searchParams.get("format") === "json";
+
+    if (resource.medium === "YOUTUBE") {
+      const embedUrl = resource.youtubeVideoId
+        ? `https://www.youtube.com/embed/${resource.youtubeVideoId}`
+        : resource.youtubeUrl || resource.fileUrl || "";
+      if (wantsJson) {
+        return apiSuccess({
+          resourceId: resource.id,
+          medium: "YOUTUBE",
+          viewUrl: embedUrl,
+          youtubeVideoId: resource.youtubeVideoId,
+        });
+      }
+      return NextResponse.redirect(embedUrl);
     }
 
     let viewUrl: string | null = null;
-
-    if (resource.r2Key && isR2Configured()) {
-      viewUrl = await getSignedViewUrl(resource.r2Key);
-    }
-
-    if (!viewUrl && resource.fileUrl) {
-      viewUrl = resource.fileUrl.startsWith("/")
-        ? new URL(resource.fileUrl, request.url).toString()
-        : resource.fileUrl;
-    }
-
-    if (!viewUrl && resource.youtubeUrl) {
-      viewUrl = resource.youtubeUrl;
+    if (resource.r2Key) {
+      viewUrl = await getSignedDownloadUrl({
+        key: resource.r2Key,
+        fileName: resource.fileName || `${resource.courseCode}-${resource.title}.pdf`,
+        disposition: "inline",
+        expiresInSeconds: 900,
+      });
+    } else if (
+      resource.fileUrl &&
+      resource.fileUrl.startsWith("https://") &&
+      !resource.fileUrl.startsWith("/api/")
+    ) {
+      viewUrl = resource.fileUrl;
     }
 
     if (!viewUrl) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: "RESOURCE_NOT_FOUND",
-            message: "No viewable stream URL attached to this resource.",
-          },
-        },
-        { status: 404 }
-      );
+      return apiError("FILE_UNAVAILABLE", "Preview URL unavailable.", 404);
     }
 
-    return NextResponse.json({
-      success: true,
-      data: {
+    if (wantsJson) {
+      return apiSuccess({
+        resourceId: resource.id,
+        medium: "PDF",
         viewUrl,
-        medium: resource.medium,
-        expiresIn: 900,
+        expiresInSeconds: 900,
+      });
+    }
+
+    const redirectUrl = viewUrl.startsWith("/")
+      ? new URL(viewUrl, req.url).toString()
+      : viewUrl;
+
+    return NextResponse.redirect(redirectUrl, {
+      status: 302,
+      headers: {
+        "Cache-Control": "private, no-store",
       },
     });
   } catch (error) {
     console.error("GET /api/resources/[id]/view error:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "Failed to generate view URL.",
-        },
-      },
-      { status: 500 }
-    );
+    return apiError("INTERNAL_ERROR", "Failed to generate preview URL.", 500);
   }
 }
-

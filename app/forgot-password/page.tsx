@@ -1,29 +1,92 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Eye, EyeOff, ArrowRight, Loader2, CheckCircle2, ArrowLeft } from "lucide-react";
-import { DEPARTMENTS } from "@/lib/departments";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  BookOpen,
+  ArrowLeft,
+  Mail,
+  KeyRound,
+  CheckCircle2,
+  Loader2,
+  Eye,
+  EyeOff,
+} from "lucide-react";
+import { extractApiError, validatePassword } from "@/lib/api-helpers";
 
-const LEVELS = ["100L", "200L", "300L", "400L", "500L"];
+function ForgotPasswordContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const token = searchParams.get("token")?.trim() || "";
 
-export default function ForgotPasswordPage() {
+  // Request-link state
   const [email, setEmail] = useState("");
-  const [department, setDepartment] = useState<string>(DEPARTMENTS[0]);
-  const [level, setLevel] = useState<string>("100L");
+  const [requestSent, setRequestSent] = useState(false);
+  const [devResetUrl, setDevResetUrl] = useState<string | null>(null);
+
+  // Consume-token state
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [resetComplete, setResetComplete] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [resetDone, setResetDone] = useState(false);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleRequestLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfoMessage(null);
+    setDevResetUrl(null);
+
+    if (!email.trim()) {
+      setError("Please enter your account email address.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(
+          extractApiError(data, "Unable to send password reset email.")
+        );
+      }
+
+      setRequestSent(true);
+      setInfoMessage(data.message);
+      if (typeof data.devResetUrl === "string") {
+        setDevResetUrl(data.devResetUrl);
+      }
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Failed to request password reset."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (!email.trim() || !department || !level || newPassword.length < 6) {
-      setError("Please complete all verification fields and choose a password of at least 6 characters.");
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    const pwCheck = validatePassword(newPassword);
+    if (!pwCheck.valid) {
+      setError(pwCheck.message!);
       return;
     }
 
@@ -32,22 +95,22 @@ export default function ForgotPasswordPage() {
       const res = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: email.trim(),
-          department,
-          level,
-          newPassword,
-        }),
+        body: JSON.stringify({ token, newPassword }),
       });
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || "Could not verify details to reset password.");
+        throw new Error(
+          extractApiError(data, "Invalid or expired password reset link.")
+        );
       }
 
-      setResetDone(true);
+      setResetComplete(true);
+      setTimeout(() => router.push("/login"), 2000);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to reset password.");
+      setError(
+        err instanceof Error ? err.message : "Failed to reset password."
+      );
     } finally {
       setLoading(false);
     }
@@ -64,151 +127,214 @@ export default function ForgotPasswordPage() {
             The NUESA Library
           </span>
         </Link>
-        <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-          Reset Account Password
-        </h2>
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+          {token ? "Choose a New Password" : "Reset Your Password"}
+        </h1>
         <p className="mt-2 text-xs sm:text-sm text-slate-500">
-          Verify your registered student email, department, and level to set a new password
+          {token
+            ? "Enter a strong new password to secure your NUESApedia account."
+            : "Enter your registered email to receive a single-use 15-minute reset link."}
         </p>
       </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white py-8 px-6 sm:px-10 shadow-[0_4px_24px_rgba(0,0,0,0.04)] border border-slate-200/80 rounded-3xl">
-          {resetDone ? (
-            <div className="text-center py-4">
-              <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-[#00875A] flex items-center justify-center mx-auto mb-4">
-                <CheckCircle2 className="w-7 h-7" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-900">Password Updated!</h3>
-              <p className="text-xs sm:text-sm text-slate-500 mt-1.5 mb-6">
-                Your account password has been updated. You can now log in with your new credentials.
-              </p>
-              <Link
-                href="/login"
-                className="w-full py-3 px-4 rounded-xl text-sm font-semibold text-white bg-[#00875A] hover:bg-[#00734c] transition-all shadow-sm flex items-center justify-center gap-2"
-              >
-                <span>Proceed to Login</span>
-                <ArrowRight className="w-4 h-4" />
-              </Link>
+      <div className="mt-6 sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="bg-white py-8 px-6 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.06)] rounded-2xl border border-slate-100 sm:px-8">
+          {error && (
+            <div
+              role="alert"
+              className="mb-5 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-medium"
+            >
+              {error}
             </div>
-          ) : (
-            <>
-              {error && (
-                <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-xs sm:text-sm text-rose-700">
-                  {error}
-                </div>
-              )}
+          )}
 
-              <form onSubmit={handleSubmit} className="space-y-4">
+          {token ? (
+            resetComplete ? (
+              <div className="text-center py-4 space-y-3">
+                <CheckCircle2 className="w-11 h-11 text-[#00875A] mx-auto" />
+                <h2 className="text-base font-bold text-slate-900">
+                  Password Updated!
+                </h2>
+                <p className="text-xs text-slate-500">
+                  All previous sessions have been signed out. Redirecting you to sign in...
+                </p>
+                <Link
+                  href="/login"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#00875A] hover:underline"
+                >
+                  Go to Sign In
+                </Link>
+              </div>
+            ) : (
+              <form className="space-y-4" onSubmit={handleConfirmReset}>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                    Registered Student Email
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="student@fuoye.edu.ng"
-                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition-all text-slate-900"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                      Department
-                    </label>
-                    <select
-                      value={department}
-                      onChange={(e) => setDepartment(e.target.value)}
-                      className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 text-slate-900"
-                    >
-                      {DEPARTMENTS.map((dept) => (
-                        <option key={dept} value={dept}>
-                          {dept}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                      Level
-                    </label>
-                    <select
-                      value={level}
-                      onChange={(e) => setLevel(e.target.value)}
-                      className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 text-slate-900"
-                    >
-                      {LEVELS.map((lvl) => (
-                        <option key={lvl} value={lvl}>
-                          {lvl}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                  <label
+                    htmlFor="reset-new-password"
+                    className="block text-xs font-semibold text-slate-700 mb-1.5"
+                  >
                     New Password
                   </label>
                   <div className="relative">
                     <input
+                      id="reset-new-password"
                       type={showPassword ? "text" : "password"}
+                      autoComplete="new-password"
                       required
-                      minLength={6}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Minimum 6 characters"
-                      className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition-all text-slate-900 pr-10"
+                      placeholder="At least 8 characters (letters + numbers)"
+                      className="w-full px-3.5 py-2.5 pr-10 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A] text-slate-900"
                     />
                     <button
                       type="button"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
                     >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      {showPassword ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
                     </button>
                   </div>
                 </div>
 
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full py-3 px-4 rounded-xl text-sm font-semibold text-white bg-[#00875A] hover:bg-[#00734c] transition-all shadow-sm hover:shadow flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                <div>
+                  <label
+                    htmlFor="reset-confirm-password"
+                    className="block text-xs font-semibold text-slate-700 mb-1.5"
                   >
-                    {loading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Verifying & updating...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Reset Password</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </>
-                    )}
-                  </button>
+                    Confirm New Password
+                  </label>
+                  <input
+                    id="reset-confirm-password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter new password"
+                    className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A] text-slate-900"
+                  />
                 </div>
-              </form>
 
-              <div className="mt-6 pt-6 border-t border-slate-100 text-center text-xs sm:text-sm text-slate-500">
-                <Link
-                  href="/login"
-                  className="inline-flex items-center gap-1.5 font-semibold text-[#00875A] hover:underline"
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#00875A] hover:bg-[#00734D] text-white text-sm font-semibold shadow-sm transition-colors disabled:opacity-60 cursor-pointer"
                 >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Back to Login</span>
-                </Link>
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Updating Password...
+                    </>
+                  ) : (
+                    <>
+                      <KeyRound className="w-4 h-4" />
+                      Save New Password
+                    </>
+                  )}
+                </button>
+              </form>
+            )
+          ) : requestSent ? (
+            <div className="space-y-4 text-center py-2">
+              <CheckCircle2 className="w-10 h-10 text-[#00875A] mx-auto" />
+              <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                {infoMessage}
+              </p>
+              {devResetUrl && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-left">
+                  <p className="text-[11px] font-bold text-amber-800 uppercase tracking-wide mb-1">
+                    Local Dev Mode Reset Link
+                  </p>
+                  <a
+                    href={devResetUrl}
+                    className="text-xs text-[#00875A] font-semibold break-all hover:underline"
+                  >
+                    {devResetUrl}
+                  </a>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setRequestSent(false);
+                  setDevResetUrl(null);
+                }}
+                className="text-xs font-semibold text-slate-500 hover:text-slate-700 cursor-pointer"
+              >
+                Try another email
+              </button>
+            </div>
+          ) : (
+            <form className="space-y-5" onSubmit={handleRequestLink}>
+              <div>
+                <label
+                  htmlFor="forgot-email"
+                  className="block text-xs font-semibold text-slate-700 mb-1.5"
+                >
+                  Account Email Address
+                </label>
+                <input
+                  id="forgot-email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="student@uniuyo.edu.ng"
+                  className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A] text-slate-900"
+                />
               </div>
-            </>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#00875A] hover:bg-[#00734D] text-white text-sm font-semibold shadow-sm transition-colors disabled:opacity-60 cursor-pointer"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Sending Reset Link...
+                  </>
+                ) : (
+                  <>
+                    <Mail className="w-4 h-4" />
+                    Send Reset Link
+                  </>
+                )}
+              </button>
+            </form>
           )}
+
+          <div className="mt-6 pt-5 border-t border-slate-100 text-center">
+            <Link
+              href="/login"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-[#00875A]"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              Back to Sign In
+            </Link>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
+export default function ForgotPasswordPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#FAFAFA] flex flex-col items-center justify-center p-4">
+          <Loader2 className="w-8 h-8 text-[#00875A] animate-spin mb-3" />
+          <p className="text-xs text-slate-400">Loading password reset...</p>
+        </div>
+      }
+    >
+      <ForgotPasswordContent />
+    </Suspense>
+  );
+}

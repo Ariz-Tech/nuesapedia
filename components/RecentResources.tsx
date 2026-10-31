@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { FileText, ChevronRight, Play, BookOpen, Loader2, AlertCircle } from "lucide-react";
+import { FileText, ChevronRight, Play, BookOpen, AlertCircle } from "lucide-react";
 
-interface ResourceItem {
+export interface RecentResourceItem {
   id: string;
   title: string;
   courseCode: string;
@@ -68,41 +68,65 @@ function getDepartmentCover(dept: string) {
   };
 }
 
-export default function RecentResources() {
-  const [resources, setResources] = useState<ResourceItem[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function RecentResources({
+  initialResources,
+}: {
+  initialResources?: RecentResourceItem[];
+}) {
+  const hasInitial = Array.isArray(initialResources);
+  const [resources, setResources] = useState<RecentResourceItem[]>(
+    initialResources ?? []
+  );
+  const [loading, setLoading] = useState(!hasInitial);
   const [error, setError] = useState<string | null>(null);
 
-  const loadResources = () => {
+  const fetchLatest = useCallback(async () => {
+    const res = await fetch("/api/resources?limit=4");
+    if (!res.ok) throw new Error("Could not load recent resources");
+    const data = await res.json();
+    return data?.success && Array.isArray(data.resources)
+      ? (data.resources.slice(0, 4) as RecentResourceItem[])
+      : [];
+  }, []);
+
+  const handleRetry = async () => {
     setLoading(true);
     setError(null);
-    fetch("/api/resources")
-      .then((res) => {
-        if (!res.ok) throw new Error("Could not load recent resources");
-        return res.json();
-      })
-      .then((data) => {
-        if (data?.success && Array.isArray(data.resources)) {
-          setResources(data.resources.slice(0, 4));
-        } else {
-          setResources([]);
-        }
-      })
-      .catch((err) => {
-        console.error("Recent resources load error:", err);
-        setError("Unable to load latest resources. Please check your connection.");
-      })
-      .finally(() => setLoading(false));
+    try {
+      const items = await fetchLatest();
+      setResources(items);
+    } catch {
+      setError("Unable to load latest resources. Please check your connection.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    loadResources();
-  }, []);
+    if (hasInitial) return;
+    let active = true;
+
+    (async () => {
+      try {
+        const items = await fetchLatest();
+        if (active) setResources(items);
+      } catch {
+        if (active) {
+          setError("Unable to load latest resources. Please check your connection.");
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [hasInitial, fetchLatest]);
 
   return (
     <section className="py-16 md:py-20 bg-white border-b border-slate-100">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header row */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
@@ -122,23 +146,25 @@ export default function RecentResources() {
           </Link>
         </div>
 
-        {/* Resources Grid */}
         {loading ? (
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="bg-slate-50 border border-slate-200/80 rounded-2xl h-64 animate-pulse" />
+              <div
+                key={i}
+                className="bg-slate-50 border border-slate-200/80 rounded-2xl h-64 animate-pulse"
+              />
             ))}
           </div>
         ) : error ? (
           <div className="mt-8 p-8 text-center bg-rose-50/60 rounded-3xl border border-rose-200/80">
             <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-2" />
-            <h3 className="text-base font-bold text-rose-900">Failed to Load Resources</h3>
-            <p className="text-xs text-rose-600 mt-1 max-w-md mx-auto">
-              {error}
-            </p>
+            <h3 className="text-base font-bold text-rose-900">
+              Failed to Load Resources
+            </h3>
+            <p className="text-xs text-rose-600 mt-1 max-w-md mx-auto">{error}</p>
             <button
               type="button"
-              onClick={loadResources}
+              onClick={handleRetry}
               className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 transition-colors cursor-pointer"
             >
               Try Again
@@ -147,7 +173,9 @@ export default function RecentResources() {
         ) : resources.length === 0 ? (
           <div className="mt-8 p-12 text-center bg-slate-50 rounded-3xl border border-slate-200/80">
             <BookOpen className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-            <h3 className="text-base font-bold text-slate-800">No Approved Resources Yet</h3>
+            <h3 className="text-base font-bold text-slate-800">
+              No Approved Resources Yet
+            </h3>
             <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
               Be the first student or faculty member to contribute verified study notes or exam solutions.
             </p>
@@ -171,10 +199,12 @@ export default function RecentResources() {
                   className="group bg-white border border-slate-200 rounded-2xl overflow-hidden hover:border-slate-300 transition-all hover:shadow-[0_8px_20px_rgba(0,0,0,0.06)] flex flex-col justify-between"
                 >
                   <div>
-                    {/* Visual Cover Header */}
                     <div
                       className="h-44 w-full rounded-t-2xl relative transition-transform duration-300 group-hover:scale-[1.01] overflow-hidden"
-                      style={{ background: isVideo && item.thumbnailUrl ? "#000" : cover.bg }}
+                      style={{
+                        background:
+                          isVideo && item.thumbnailUrl ? "#000" : cover.bg,
+                      }}
                     >
                       {isVideo && item.thumbnailUrl ? (
                         <div className="relative w-full h-full">
@@ -200,32 +230,44 @@ export default function RecentResources() {
                       ) : (
                         <div className="w-full h-full flex flex-col justify-between p-4 text-white relative">
                           <div className="absolute top-2 right-2 opacity-15">
-                            <svg width="70" height="70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
+                            <svg
+                              width="70"
+                              height="70"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1"
+                            >
                               <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z" />
                               <path d="M6 6h10" />
                               <path d="M6 10h10" />
                             </svg>
                           </div>
                           <div>
-                            <span className={`text-[10px] tracking-widest uppercase font-mono font-medium ${cover.accent}`}>
+                            <span
+                              className={`text-[10px] tracking-widest uppercase font-mono font-medium ${cover.accent}`}
+                            >
                               {cover.tag}
                             </span>
                             <h4 className="text-sm font-bold tracking-tight text-white mt-0.5 leading-snug line-clamp-2">
                               {item.courseCode}
                             </h4>
-                            <span className={`text-[11px] font-medium line-clamp-2 ${cover.subAccent}`}>
+                            <span
+                              className={`text-[11px] font-medium line-clamp-2 ${cover.subAccent}`}
+                            >
                               {item.title}
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-[9px] font-mono border-t border-white/10 pt-2 text-slate-300">
                             <span>{item.level}</span>
-                            <span className="font-semibold text-white uppercase">{item.type}</span>
+                            <span className="font-semibold text-white uppercase">
+                              {item.type}
+                            </span>
                           </div>
                         </div>
                       )}
                     </div>
 
-                    {/* Content Details */}
                     <div className="p-4 sm:p-5">
                       <div className="flex items-center gap-2 mb-3 flex-wrap">
                         <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
@@ -242,11 +284,18 @@ export default function RecentResources() {
                     </div>
                   </div>
 
-                  {/* Document metadata footer */}
                   <div className="px-4 sm:px-5 pb-4 pt-1 flex items-center justify-between text-xs text-slate-400">
                     <span className="flex items-center gap-1.5">
-                      {isVideo ? <Play className="w-3.5 h-3.5 text-red-500" /> : <FileText className="w-3.5 h-3.5" />}
-                      <span>{isVideo ? "YouTube Tutorial" : item.fileSize || "PDF Document"}</span>
+                      {isVideo ? (
+                        <Play className="w-3.5 h-3.5 text-red-500" />
+                      ) : (
+                        <FileText className="w-3.5 h-3.5" />
+                      )}
+                      <span>
+                        {isVideo
+                          ? "YouTube Tutorial"
+                          : item.fileSize || "PDF Document"}
+                      </span>
                     </span>
                     <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
                       Verified

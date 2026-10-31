@@ -12,11 +12,11 @@ import {
   Sparkles,
   ArrowRight,
   ShieldCheck,
-  Video,
   Play,
   ExternalLink,
 } from "lucide-react";
 import type { DbSubmission } from "@/lib/db";
+import { extractApiError } from "@/lib/api-helpers";
 
 export type { DbSubmission };
 
@@ -231,7 +231,9 @@ export default function ResourceUploadPortal({
 
         const data = await response.json();
         if (!response.ok || !data.success) {
-          throw new Error(data.error || "Failed to submit YouTube tutorial.");
+          throw new Error(
+            extractApiError(data, "Failed to submit YouTube tutorial.")
+          );
         }
 
         const submission = data.data?.submission || data.submission;
@@ -257,42 +259,58 @@ export default function ResourceUploadPortal({
             description: description.trim(),
             fileName: file!.name,
             fileSize: `${(file!.size / (1024 * 1024)).toFixed(1)} MB`,
+            fileSizeBytes: file!.size,
             contentType: file!.type || "application/pdf",
           }),
         });
 
         const initData = await initResponse.json();
         if (!initResponse.ok || !initData.success) {
-          throw new Error(initData.error || "Failed to initiate Cloudflare R2 upload.");
+          throw new Error(
+            extractApiError(initData, "Failed to initiate Cloudflare R2 upload.")
+          );
         }
 
-        const { uploadId, uploadUrl } = initData.data;
+        const uploadId: string | undefined =
+          initData.submission?.id || initData.data?.uploadId;
+        const uploadUrl: string | undefined =
+          initData.signedUploadUrl || initData.data?.uploadUrl;
+        const r2Key: string | undefined =
+          initData.r2Key || initData.data?.r2Key;
+
+        if (!uploadId || !uploadUrl) {
+          throw new Error("Server did not return a valid upload session.");
+        }
 
         // Step 2: Stream file directly to Cloudflare R2 (Bypasses Next.js server memory)
         setUploadProgress(50);
         const uploadResponse = await fetch(uploadUrl, {
           method: "PUT",
           headers: {
-            "Content-Type": file!.type || "application/pdf",
+            "Content-Type": "application/pdf",
           },
           body: file!,
         });
 
         if (!uploadResponse.ok) {
-          throw new Error("Direct upload to Cloudflare R2 failed. Please try again.");
+          throw new Error(
+            "Direct upload to storage failed. Please ensure the file is a valid PDF under 30MB."
+          );
         }
 
-        // Step 3: Complete upload confirmation and route to Moderation Queue
+        // Step 3: Complete upload confirmation and verify PDF magic signature server-side
         setUploadProgress(85);
         const completeResponse = await fetch(`/api/uploads/${uploadId}/complete`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ uploadId }),
+          body: JSON.stringify({ uploadId, r2Key }),
         });
 
         const completeData = await completeResponse.json();
         if (!completeResponse.ok || !completeData.success) {
-          throw new Error(completeData.error || "Failed to confirm upload completion.");
+          throw new Error(
+            extractApiError(completeData, "Failed to verify upload completion.")
+          );
         }
 
         setUploadProgress(100);

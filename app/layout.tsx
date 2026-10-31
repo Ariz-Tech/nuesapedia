@@ -1,24 +1,29 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, Plus_Jakarta_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { SavedResourcesProvider } from "@/context/SavedResourcesContext";
 import PwaRegistration from "@/components/PwaRegistration";
 
-const geistSans = Geist({
+const geistSans = localFont({
+  src: "./fonts/Geist-Latin.woff2",
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  weight: "100 900",
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/GeistMono-Latin.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: "100 900",
+  display: "swap",
 });
 
-const plusJakarta = Plus_Jakarta_Sans({
+const plusJakarta = localFont({
+  src: "./fonts/PlusJakartaSans-Latin.woff2",
   variable: "--font-jakarta",
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
+  weight: "600 800",
+  display: "swap",
 });
 
 export const viewport: Viewport = {

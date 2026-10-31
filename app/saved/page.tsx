@@ -16,7 +16,6 @@ import {
 } from "@/lib/saved-client";
 import { getResourceBadgeStyle } from "@/lib/badge-styles";
 import {
-  cacheCatalogResources,
   getCachedCatalogResources,
   formatBytes,
 } from "@/lib/offline-vault";
@@ -65,7 +64,9 @@ function SavedVaultContent() {
   const [hydrating, setHydrating] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedDept, setSelectedDept] = useState("All");
-  const [selectedType, setSelectedType] = useState<ShelfFilter>("All");
+  const [selectedType, setSelectedType] = useState<ShelfFilter>(() =>
+    searchParams.get("tab") === "offline" ? "Offline" : "All"
+  );
   const [busyId, setBusyId] = useState<string | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
   const [activeMaterial, setActiveMaterial] = useState<CourseMaterialItem | null>(null);
@@ -73,45 +74,19 @@ function SavedVaultContent() {
   const [clearingVault, setClearingVault] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Sync ?tab=offline query param or default to Offline tab if offline and user has downloaded docs
-  useEffect(() => {
-    const tab = searchParams.get("tab");
-    if (tab === "offline") {
-      setSelectedType("Offline");
-    }
-  }, [searchParams]);
-
   useEffect(() => {
     let mounted = true;
 
     async function hydrateCatalogAndSaved() {
       try {
-        let catalog: CourseMaterialItem[] = [];
-        if (typeof navigator === "undefined" || navigator.onLine) {
-          const catRes = await fetch("/api/resources?limit=500").catch(() => null);
-          const catJson = catRes && catRes.ok ? await catRes.json() : null;
-          const list = Array.isArray(catJson?.data)
-            ? catJson.data
-            : Array.isArray(catJson?.resources)
-              ? catJson.resources
-              : [];
-          if (catJson?.success && list.length > 0) {
-            catalog = list.map((r: CourseMaterialItem) => normalizeMaterial(r));
-            cacheCatalogResources(catalog).catch(() => {});
-          }
-        }
-
-        if (catalog.length === 0) {
-          catalog = await getCachedCatalogResources();
-        }
-
-        await refreshSaved(catalog);
+        const cachedCatalog = await getCachedCatalogResources();
+        await refreshSaved(cachedCatalog);
       } finally {
         if (mounted) setHydrating(false);
       }
     }
 
-    hydrateCatalogAndSaved();
+    void hydrateCatalogAndSaved();
     return () => {
       mounted = false;
     };
@@ -736,6 +711,11 @@ function SavedVaultContent() {
   );
 }
 
+function SavedVaultKeyedWrapper() {
+  const searchParams = useSearchParams();
+  return <SavedVaultContent key={searchParams.get("tab") || "all"} />;
+}
+
 export default function SavedVaultPage() {
   return (
     <Suspense
@@ -752,7 +732,7 @@ export default function SavedVaultPage() {
         </div>
       }
     >
-      <SavedVaultContent />
+      <SavedVaultKeyedWrapper />
     </Suspense>
   );
 }

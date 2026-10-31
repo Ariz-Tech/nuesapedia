@@ -2,42 +2,49 @@ import Navbar from "@/components/Navbar";
 import HeroSection from "@/components/HeroSection";
 import ValueProposition from "@/components/ValueProposition";
 import BrowseDepartments from "@/components/BrowseDepartments";
-import RecentResources from "@/components/RecentResources";
+import RecentResources, { type RecentResourceItem } from "@/components/RecentResources";
 import Testimonials from "@/components/Testimonials";
 import FaqSection from "@/components/FaqSection";
 import CtaBanner from "@/components/CtaBanner";
 import Footer from "@/components/Footer";
+import { getApprovedResourcesPaginated } from "@/lib/db";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  let initialRecent: RecentResourceItem[] | undefined = undefined;
+  try {
+    const res = await getApprovedResourcesPaginated({ limit: 4, page: 1 });
+    initialRecent = res.resources.map((r) => ({
+      id: r.id,
+      title: r.title,
+      courseCode: r.courseCode,
+      department: r.department,
+      level: r.level,
+      type: r.type,
+      medium: r.medium,
+      fileSize: r.fileSize,
+      youtubeUrl: r.youtubeUrl,
+      thumbnailUrl: r.thumbnailUrl,
+    }));
+  } catch {
+    initialRecent = undefined;
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[#FAFAFA] font-sans antialiased text-slate-900">
-      {/* 1. Header / Navigation */}
       <Navbar />
 
       <main className="flex-1">
-        {/* 2. Hero Section */}
         <HeroSection />
-
-        {/* 3. Value Proposition / Feature Highlights */}
         <ValueProposition />
-
-        {/* 4. Browse Library by Department Carousel */}
         <BrowseDepartments />
-
-        {/* 5. Recently Added Resources */}
-        <RecentResources />
-
-        {/* 6. Student Testimonials */}
+        <RecentResources initialResources={initialRecent} />
         <Testimonials />
-
-        {/* 7. Frequently Asked Questions */}
         <FaqSection />
-
-        {/* 8. Forest Green Call-To-Action Banner */}
         <CtaBanner />
       </main>
 
-      {/* 9. Faculty Footer */}
       <Footer />
     </div>
   );

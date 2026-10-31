@@ -1,127 +1,73 @@
-import { NextResponse } from "next/server";
-import { getSession, hasAdminAccess } from "@/lib/auth";
-import { getAllUsers, updateUserRole, initDb } from "@/lib/db";
-
-export const dynamic = "force-dynamic";
+import { getSession } from "@/lib/auth";
+import { getAllUsers, updateUserRole } from "@/lib/db";
+import { apiError, apiSuccess } from "@/lib/api-helpers";
 
 const VALID_ROLES = ["STUDENT", "MODERATOR", "ADMIN"];
 
-/**
- * GET: Retrieve all registered users for Admin Role Management
- */
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const session = await getSession();
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Authentication required." },
-        { status: 401 }
-      );
+    if (!session || session.role !== "ADMIN") {
+      return apiError("FORBIDDEN", "Admin privileges required.", 403);
     }
 
-    if (!hasAdminAccess(session.role)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Access denied. Administrator privileges required.",
-          code: "FORBIDDEN",
-        },
-        { status: 403 }
-      );
-    }
+    const { searchParams } = new URL(req.url);
+    const limit = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") || "200", 10) || 200));
+    const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10) || 0);
 
-    await initDb();
-    const users = await getAllUsers();
-
-    return NextResponse.json({
-      success: true,
-      users,
-      currentAdminId: session.userId,
-    });
+    const users = await getAllUsers({ limit, offset });
+    return apiSuccess({ users });
   } catch (error) {
-    console.error("Admin get users error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to retrieve user directory." },
-      { status: 500 }
-    );
+    console.error("GET /api/admin/users error:", error);
+    return apiError("INTERNAL_ERROR", "Internal server error.", 500);
   }
 }
 
-/**
- * PATCH: Update a user's role (STUDENT, MODERATOR, ADMIN)
- * Request body:
- *  - userId: string
- *  - role: "STUDENT" | "MODERATOR" | "ADMIN"
- */
-export async function PATCH(request: Request) {
+export async function PATCH(req: Request) {
   try {
     const session = await getSession();
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Authentication required." },
-        { status: 401 }
+    if (!session || session.role !== "ADMIN") {
+      return apiError("FORBIDDEN", "Admin privileges required.", 403);
+    }
+
+    const body = await req.json();
+    const { userId, role } = body ?? {};
+
+    if (!userId || !role || !VALID_ROLES.includes(String(role))) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Valid userId and role (STUDENT, MODERATOR, ADMIN) are required.",
+        400
       );
     }
 
-    if (!hasAdminAccess(session.role)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Access denied. Administrator privileges required to change roles.",
-          code: "FORBIDDEN",
-        },
-        { status: 403 }
+    if (userId === session.userId && role !== "ADMIN") {
+      return apiError(
+        "FORBIDDEN",
+        "You cannot revoke your own ADMIN privileges.",
+        400
       );
     }
 
-    await initDb();
-
-    const body = await request.json();
-    const { userId, role } = body;
-
-    if (!userId || !role) {
-      return NextResponse.json(
-        { success: false, error: "User ID and new role are required." },
-        { status: 400 }
-      );
+    const updated = await updateUserRole(String(userId), String(role));
+    if (!updated) {
+      return apiError("NOT_FOUND", "User not found.", 404);
     }
 
-    const upperRole = role.toUpperCase();
-    if (!VALID_ROLES.includes(upperRole)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Invalid role. Allowed roles: ${VALID_ROLES.join(", ")}`,
-        },
-        { status: 400 }
-      );
-    }
-
-    const updatedUser = await updateUserRole(userId, upperRole);
-    if (!updatedUser) {
-      return NextResponse.json(
-        { success: false, error: "Target user not found." },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: `User ${updatedUser.name} (${updatedUser.email}) role updated to ${upperRole}.`,
+    return apiSuccess({
       user: {
-        id: updatedUser.id,
-        name: updatedUser.name,
-        email: updatedUser.email,
-        department: updatedUser.department,
-        level: updatedUser.level,
-        role: updatedUser.role,
+        id: updated.id,
+        name: updated.name,
+        email: updated.email,
+        department: updated.department,
+        level: updated.level,
+        avatar: updated.avatar,
+        role: updated.role,
+        createdAt: updated.createdAt,
       },
     });
   } catch (error) {
-    console.error("Admin update role error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to update user role." },
-      { status: 500 }
-    );
+    console.error("PATCH /api/admin/users error:", error);
+    return apiError("INTERNAL_ERROR", "Internal server error.", 500);
   }
 }

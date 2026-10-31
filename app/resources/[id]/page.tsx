@@ -9,12 +9,14 @@ import {
   type CourseMaterialItem,
   normalizeMaterial,
   extractYoutubeId,
+  getMaterialViewUrl,
   shareOrCopyMaterialLink,
 } from "@/lib/saved-client";
 import { getResourceBadgeStyle } from "@/lib/badge-styles";
 import {
   getOfflineDocument,
   getCachedCatalogResources,
+  getReadingProgress,
   saveReadingProgress,
 } from "@/lib/offline-vault";
 import { useSavedResources } from "@/context/SavedResourcesContext";
@@ -34,6 +36,7 @@ import {
   WifiOff,
   Share2,
   Check,
+  CheckCircle2,
 } from "lucide-react";
 
 interface PageProps {
@@ -59,17 +62,26 @@ export default function ResourceReaderPage({ params }: PageProps) {
   const [activeTab, setActiveTab] = useState<"reader" | "details">("reader");
   const [savingBookmark, setSavingBookmark] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [readingPct, setReadingPct] = useState(0);
 
   useEffect(() => {
     let mounted = true;
     let createdBlobUrl: string | null = null;
+    let studyTimer: number | undefined;
 
     async function load() {
       try {
         let found: CourseMaterialItem | null = null;
 
         // 1. Check IndexedDB offline vault first for instant offline availability
-        const offlineDoc = await getOfflineDocument(resourceId);
+        const [offlineDoc, existingProg] = await Promise.all([
+          getOfflineDocument(resourceId),
+          getReadingProgress(resourceId),
+        ]);
+        if (mounted && existingProg) {
+          setReadingPct(existingProg.percentage);
+        }
+
         if (offlineDoc) {
           found = normalizeMaterial(offlineDoc.material);
           if (offlineDoc.blob && offlineDoc.blob.size > 0) {
@@ -78,7 +90,7 @@ export default function ResourceReaderPage({ params }: PageProps) {
           }
         }
 
-        // 2. Fetch latest metadata from API if online
+        // 2. Fetch authoritative metadata from single-resource endpoint if online
         if (typeof navigator === "undefined" || navigator.onLine) {
           try {
             const res = await fetch(`/api/resources/${encodeURIComponent(resourceId)}`);
@@ -86,23 +98,13 @@ export default function ResourceReaderPage({ params }: PageProps) {
             const rawItem = data?.data || data?.resource;
             if (data?.success && rawItem) {
               found = normalizeMaterial(rawItem);
-            } else if (!found) {
-              const listRes = await fetch("/api/resources?limit=500");
-              const listData = listRes.ok ? await listRes.json() : null;
-              const list = Array.isArray(listData?.data)
-                ? listData.data
-                : Array.isArray(listData?.resources)
-                  ? listData.resources
-                  : [];
-              const match = list.find((r: CourseMaterialItem) => r.id === resourceId);
-              if (match) found = normalizeMaterial(match);
             }
           } catch {
-            // Fall through to cached catalog
+            // Fall through to cached catalog when offline
           }
         }
 
-        // 3. Fallback to IndexedDB cached catalog if still not found
+        // 3. Offline fallback to IndexedDB cached catalog
         if (!found) {
           const cachedCatalog = await getCachedCatalogResources();
           const match = cachedCatalog.find((r) => r.id === resourceId);
@@ -111,8 +113,21 @@ export default function ResourceReaderPage({ params }: PageProps) {
 
         if (!mounted) return;
         setResource(found);
-        if (found) {
-          saveReadingProgress(found.id, 100, 1).catch(() => {});
+
+        // Honest study progress: mark 25% ("In Progress") after 5s of viewing a PDF
+        if (
+          found &&
+          found.medium === "PDF" &&
+          (!existingProg || existingProg.percentage === 0)
+        ) {
+          studyTimer = window.setTimeout(() => {
+            if (!mounted) return;
+            setReadingPct((prev) => {
+              if (prev > 0) return prev;
+              void saveReadingProgress(found!.id, 25, 1);
+              return 25;
+            });
+          }, 5000);
         }
       } catch (err) {
         console.error("Failed to load resource:", err);
@@ -121,9 +136,10 @@ export default function ResourceReaderPage({ params }: PageProps) {
       }
     }
 
-    load();
+    void load();
     return () => {
       mounted = false;
+      if (studyTimer) window.clearTimeout(studyTimer);
       if (createdBlobUrl) {
         URL.revokeObjectURL(createdBlobUrl);
       }
@@ -188,8 +204,9 @@ export default function ResourceReaderPage({ params }: PageProps) {
   const videoId =
     extractYoutubeId(resource.youtubeVideoId) || extractYoutubeId(resource.youtubeUrl);
   const badge = getResourceBadgeStyle(resource);
-  const canDownloadPdf = !isVideo && (Boolean(resource.fileUrl) || cachedOffline);
-  const pdfSrc = offlineBlobUrl || (!isOffline ? resource.fileUrl : undefined);
+  const onlinePdfViewUrl = getMaterialViewUrl(resource);
+  const canDownloadPdf = !isVideo && (!isOffline || cachedOffline);
+  const pdfSrc = offlineBlobUrl || (!isOffline ? onlinePdfViewUrl : undefined);
   const courseMeta = resolveCourseMetadata(resource.courseCode, {
     department: resource.department,
     level: resource.level,
@@ -212,6 +229,24 @@ export default function ResourceReaderPage({ params }: PageProps) {
           </Link>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {!isVideo && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const nextPct = readingPct >= 100 ? 25 : 100;
+                  setReadingPct(nextPct);
+                  await saveReadingProgress(canonicalId, nextPct, 1);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                  readingPct >= 100
+                    ? "bg-emerald-50 border-emerald-200 text-[#00875A]"
+                    : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{readingPct >= 100 ? "Completed" : "Mark Completed"}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={async () => {
@@ -417,12 +452,15 @@ export default function ResourceReaderPage({ params }: PageProps) {
             ) : (
               <div className="space-y-4">
                 {pdfSrc && (
-                  <div className="flex items-center justify-end gap-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="sm:hidden text-[11px] font-medium text-emerald-900 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-xl">
+                      Mobile tip: tap <strong>Open Fullscreen</strong> for smooth multi-page PDF scrolling.
+                    </span>
                     <a
                       href={pdfSrc}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="px-3 py-1.5 rounded-xl bg-[#0C3B2E] text-white hover:bg-[#0A251D] text-xs font-semibold inline-flex items-center gap-1.5"
+                      className="ml-auto px-3 py-1.5 rounded-xl bg-[#0C3B2E] text-white hover:bg-[#0A251D] text-xs font-semibold inline-flex items-center gap-1.5"
                     >
                       <Maximize2 className="w-3.5 h-3.5" />
                       <span>Open Fullscreen</span>

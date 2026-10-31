@@ -1,15 +1,10 @@
-import { NextResponse } from "next/server";
-import { COOKIE_NAME } from "@/lib/auth";
+import { SESSION_COOKIE_NAME } from "@/lib/auth";
+import { apiSuccess } from "@/lib/api-helpers";
 
 export async function POST() {
-  const response = NextResponse.json({
-    success: true,
-    message: "Logged out successfully",
-  });
-
-  // Clear cookie
+  const response = apiSuccess({ message: "Logged out successfully" });
   response.cookies.set({
-    name: COOKIE_NAME,
+    name: SESSION_COOKIE_NAME,
     value: "",
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -17,6 +12,5 @@ export async function POST() {
     path: "/",
     maxAge: 0,
   });
-
   return response;
 }

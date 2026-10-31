@@ -22,12 +22,14 @@ export interface CourseMaterialItem {
   createdAt?: string;
 }
 
-const LOCAL_SAVED_KEY = "nuesapedia_saved_materials_v1";
+const LEGACY_SHARED_KEY = "nuesapedia_saved_materials_v1";
+const GUEST_SAVED_KEY = "nuesapedia_saved_guest_v2";
 export const SAVED_MATERIALS_EVENT = "nuesa-saved-materials-changed";
 
-/**
- * Reliably extract an 11-character YouTube video ID from either an ID or a URL
- */
+function getStorageKey(userId?: string | null): string {
+  return userId ? `nuesapedia_saved_user_${userId}` : GUEST_SAVED_KEY;
+}
+
 export function extractYoutubeId(input?: string | null): string | undefined {
   if (!input) return undefined;
   const trimmed = input.trim();
@@ -39,247 +41,253 @@ export function extractYoutubeId(input?: string | null): string | undefined {
   return match?.[1];
 }
 
-/**
- * Determine if a resource item is a video material
- */
 export function isVideoMaterial(item: Partial<CourseMaterialItem>): boolean {
   if (item.medium === "YOUTUBE") return true;
-  if (item.youtubeVideoId || item.youtubeUrl) return true;
-  const t = (item.type || "").toLowerCase();
-  return t.includes("video") || t.includes("youtube");
+  if (item.youtubeVideoId || extractYoutubeId(item.youtubeUrl)) return true;
+  if (extractYoutubeId(item.fileUrl)) return true;
+  return false;
 }
 
-/**
- * Build the direct download endpoint URL for a downloadable resource
- */
-export function getMaterialDownloadUrl(item: { id: string; resourceId?: string }): string {
+export function getMaterialDownloadUrl(item: {
+  id: string;
+  resourceId?: string;
+}): string {
   const targetId = item.resourceId || item.id;
   return `/api/resources/${encodeURIComponent(targetId)}/download`;
 }
 
-/**
- * Normalize raw API resource / saved item into a consistent CourseMaterialItem
- */
-export function normalizeMaterial(raw: Partial<CourseMaterialItem> & { id: string }): CourseMaterialItem {
+export function getMaterialViewUrl(item: {
+  id: string;
+  resourceId?: string;
+  medium?: "PDF" | "YOUTUBE";
+  fileUrl?: string;
+}): string {
+  const targetId = item.resourceId || item.id;
+  if (item.medium === "YOUTUBE") {
+    return item.fileUrl || "";
+  }
+  return `/api/resources/${encodeURIComponent(targetId)}/view`;
+}
+
+export function normalizeMaterial(
+  raw: Partial<CourseMaterialItem> & { id: string }
+): CourseMaterialItem {
   const canonicalId = raw.resourceId || raw.id;
-  const ytId = extractYoutubeId(raw.youtubeVideoId) || extractYoutubeId(raw.youtubeUrl);
-  const video = raw.medium === "YOUTUBE" || Boolean(ytId) || isVideoMaterial(raw);
+  const videoId =
+    raw.youtubeVideoId ||
+    extractYoutubeId(raw.youtubeUrl) ||
+    extractYoutubeId(raw.fileUrl);
+  const video = raw.medium === "YOUTUBE" || Boolean(videoId);
 
   return {
     id: canonicalId,
     resourceId: canonicalId,
-    title: raw.title || "Untitled Course Material",
-    courseCode: (raw.courseCode || "ENG").trim().toUpperCase(),
-    department: raw.department || "Faculty of Engineering",
-    level: raw.level || "All Levels",
+    title: raw.title || "Academic Resource",
+    courseCode: raw.courseCode || "GEN 101",
+    department: raw.department || "General Engineering",
+    level: raw.level || "100L",
     semester: raw.semester || "First Semester",
-    sessionYear: raw.sessionYear,
-    type: raw.type || (video ? "Video Tutorial" : "Lecture Note"),
+    sessionYear: raw.sessionYear || "2025/2026",
+    type: raw.type || "Lecture Notes",
     medium: video ? "YOUTUBE" : "PDF",
-    fileUrl: raw.fileUrl,
+    fileUrl: video
+      ? raw.youtubeUrl || raw.fileUrl
+      : `/api/resources/${encodeURIComponent(canonicalId)}/view`,
     fileName: raw.fileName,
-    fileSize: raw.fileSize || (video ? "Video Stream" : "PDF Document"),
+    fileSize: raw.fileSize || (video ? "Streaming Video" : "PDF Document"),
     downloads: typeof raw.downloads === "number" ? raw.downloads : 0,
-    youtubeUrl: raw.youtubeUrl || (ytId ? `https://www.youtube.com/watch?v=${ytId}` : undefined),
-    youtubeVideoId: ytId,
+    youtubeUrl:
+      raw.youtubeUrl ||
+      (videoId ? `https://www.youtube.com/watch?v=${videoId}` : undefined),
+    youtubeVideoId: videoId,
     thumbnailUrl:
-      raw.thumbnailUrl || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : undefined),
+      raw.thumbnailUrl ||
+      (videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : undefined),
     description: raw.description,
-    createdAt: raw.createdAt || new Date().toISOString(),
+    createdAt: raw.createdAt,
   };
 }
 
-export function readLocalSaved(): CourseMaterialItem[] {
+export function readLocalSaved(userId?: string | null): CourseMaterialItem[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(LOCAL_SAVED_KEY);
+    // Purge legacy un-namespaced storage key to prevent cross-account contamination on shared PCs
+    if (window.localStorage.getItem(LEGACY_SHARED_KEY)) {
+      window.localStorage.removeItem(LEGACY_SHARED_KEY);
+    }
+
+    const raw = window.localStorage.getItem(getStorageKey(userId));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter((item): item is CourseMaterialItem => Boolean(item && (item.id || item.resourceId)))
-      .map((item) => normalizeMaterial(item));
+      .filter((x) => x && typeof x.id === "string")
+      .map((x) => normalizeMaterial(x));
   } catch {
     return [];
   }
 }
 
-export function writeLocalSaved(items: CourseMaterialItem[]): void {
+export function writeLocalSaved(
+  items: CourseMaterialItem[],
+  userId?: string | null
+): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(LOCAL_SAVED_KEY, JSON.stringify(items));
+    window.localStorage.setItem(getStorageKey(userId), JSON.stringify(items));
     window.dispatchEvent(new CustomEvent(SAVED_MATERIALS_EVENT));
   } catch {
-    // Ignore storage quota errors
+    // Ignore storage quota errors on localStorage
   }
 }
 
 /**
- * Load saved materials from server (if authenticated) merged with local metadata cache,
- * falling back seamlessly to localStorage for guest users.
+ * Purges user-scoped local bookmark cache on logout so shared campus PCs
+ * never leak or cross-sync bookmarks into the next student's account.
  */
+export function clearUserSavedCache(userId?: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(LEGACY_SHARED_KEY);
+    if (userId) {
+      window.localStorage.removeItem(getStorageKey(userId));
+    }
+    window.dispatchEvent(new CustomEvent(SAVED_MATERIALS_EVENT));
+  } catch {
+    // Ignore
+  }
+}
+
 export async function fetchSavedMaterials(
-  catalogLookup?: CourseMaterialItem[]
+  catalogLookup?: CourseMaterialItem[],
+  userId?: string | null
 ): Promise<{ items: CourseMaterialItem[]; isAuthenticated: boolean }> {
-  const localItems = readLocalSaved();
-  const localMap = new Map<string, CourseMaterialItem>();
-  for (const item of localItems) {
-    localMap.set(item.resourceId || item.id, item);
+  const lookupMap = new Map<string, CourseMaterialItem>();
+  if (catalogLookup) {
+    for (const c of catalogLookup) {
+      lookupMap.set(c.id, c);
+      if (c.resourceId) lookupMap.set(c.resourceId, c);
+    }
   }
 
-  const catalogMap = new Map<string, CourseMaterialItem>();
-  if (catalogLookup) {
-    for (const item of catalogLookup) {
-      catalogMap.set(item.id, item);
-    }
+  // Unauthenticated guest mode: read strictly from guest namespace
+  if (!userId) {
+    const guestItems = readLocalSaved(null).map((item) => {
+      const enriched = lookupMap.get(item.resourceId || item.id);
+      return enriched ? normalizeMaterial({ ...item, ...enriched }) : item;
+    });
+    return { items: guestItems, isAuthenticated: false };
   }
 
   try {
     const res = await fetch("/api/saved", { cache: "no-store" });
     if (res.status === 401) {
-      // Enrich guest items with latest catalog info if available
-      const enrichedGuest = localItems.map((loc) => {
-        const key = loc.resourceId || loc.id;
-        const fromCat = catalogMap.get(key);
-        return fromCat ? normalizeMaterial({ ...loc, ...fromCat, createdAt: loc.createdAt }) : loc;
-      });
-      return { items: enrichedGuest, isAuthenticated: false };
+      return { items: readLocalSaved(null), isAuthenticated: false };
+    }
+    if (!res.ok) {
+      return { items: readLocalSaved(userId), isAuthenticated: true };
     }
 
     const data = await res.json();
-    if (!res.ok || !data?.success) {
-      return { items: localItems, isAuthenticated: false };
-    }
+    const serverSaved: Record<string, unknown>[] = Array.isArray(data?.saved)
+      ? data.saved
+      : [];
 
-    const serverRaw: Array<Partial<CourseMaterialItem> & { id: string; resourceId?: string }> =
-      Array.isArray(data.data) ? data.data : [];
-
-    const serverIds = new Set(serverRaw.map((s) => s.resourceId || s.id));
-
-    // Sync any guest-bookmarked items into the user's account once logged in
-    for (const loc of localItems) {
-      const key = loc.resourceId || loc.id;
-      if (!serverIds.has(key)) {
-        fetch("/api/saved", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            resourceId: key,
-            title: loc.title,
-            courseCode: loc.courseCode,
-            department: loc.department,
-            type: loc.medium === "YOUTUBE" && !loc.type.toLowerCase().includes("video") ? "Video Tutorial" : loc.type,
-            fileSize: loc.fileSize || (loc.medium === "YOUTUBE" ? "Video Stream" : "PDF Document"),
-          }),
-        }).catch(() => {});
-      }
-    }
-
-    const merged: CourseMaterialItem[] = serverRaw.map((srv) => {
-      const key = srv.resourceId || srv.id;
-      const cached = localMap.get(key);
-      const fromCat = catalogMap.get(key);
+    const normalized = serverSaved.map((raw) => {
+      const resourceId = String(raw.resourceId || raw.id);
+      const fromCatalog = lookupMap.get(resourceId);
       return normalizeMaterial({
-        ...cached,
-        ...srv,
-        ...fromCat,
-        id: key,
-        resourceId: key,
-        createdAt: srv.createdAt || cached?.createdAt,
+        ...(fromCatalog || {}),
+        ...(raw as Partial<CourseMaterialItem>),
+        id: resourceId,
+        resourceId,
       });
     });
 
-    // Include newly synced local items not yet in serverRaw response
-    for (const loc of localItems) {
-      const key = loc.resourceId || loc.id;
-      if (!serverIds.has(key)) {
-        const fromCat = catalogMap.get(key);
-        merged.unshift(fromCat ? normalizeMaterial({ ...loc, ...fromCat, createdAt: loc.createdAt }) : loc);
-      }
-    }
-
-    writeLocalSaved(merged);
-    return { items: merged, isAuthenticated: true };
+    // Cache under user-namespaced key for offline viewing by THIS user only
+    writeLocalSaved(normalized, userId);
+    return { items: normalized, isAuthenticated: true };
   } catch {
-    return { items: localItems, isAuthenticated: false };
+    return { items: readLocalSaved(userId), isAuthenticated: true };
   }
 }
 
-/**
- * Add a material to bookmarks (both localStorage and server API if authenticated)
- */
-export async function saveMaterialBookmark(item: CourseMaterialItem): Promise<void> {
+export async function saveMaterialBookmark(
+  item: CourseMaterialItem,
+  userId?: string | null
+): Promise<void> {
   const normalized = normalizeMaterial(item);
-  const current = readLocalSaved();
-  const key = normalized.resourceId || normalized.id;
+  const existing = readLocalSaved(userId);
+  const filtered = existing.filter(
+    (x) => (x.resourceId || x.id) !== (normalized.resourceId || normalized.id)
+  );
+  writeLocalSaved([normalized, ...filtered], userId);
 
-  const filtered = current.filter((x) => (x.resourceId || x.id) !== key);
-  writeLocalSaved([normalized, ...filtered]);
+  if (!userId) return;
 
   try {
     await fetch("/api/saved", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        resourceId: key,
+        resourceId: normalized.resourceId || normalized.id,
         title: normalized.title,
         courseCode: normalized.courseCode,
         department: normalized.department,
-        type:
-          normalized.medium === "YOUTUBE" && !normalized.type.toLowerCase().includes("video")
-            ? "Video Tutorial"
-            : normalized.type,
-        fileSize:
-          normalized.fileSize || (normalized.medium === "YOUTUBE" ? "Video Stream" : "PDF Document"),
+        type: normalized.type,
+        fileSize: normalized.fileSize,
       }),
     });
   } catch {
-    // Kept in localStorage for offline/guest resilience
+    // Offline fallback remains stored in user-scoped localStorage
   }
 }
 
-/**
- * Remove a material from bookmarks (both localStorage and server API if authenticated)
- */
-export async function removeMaterialBookmark(resourceId: string): Promise<void> {
-  const current = readLocalSaved();
-  writeLocalSaved(current.filter((x) => (x.resourceId || x.id) !== resourceId));
+export async function removeMaterialBookmark(
+  resourceId: string,
+  userId?: string | null
+): Promise<void> {
+  const existing = readLocalSaved(userId);
+  const filtered = existing.filter(
+    (x) => x.id !== resourceId && x.resourceId !== resourceId
+  );
+  writeLocalSaved(filtered, userId);
+
+  if (!userId) return;
 
   try {
     await fetch(`/api/saved?resourceId=${encodeURIComponent(resourceId)}`, {
       method: "DELETE",
     });
   } catch {
-    // Local removal already applied
+    // Ignore network error while offline
   }
 }
 
-/**
- * Share or copy a direct deep link to open a course material immediately in the library
- */
 export async function shareOrCopyMaterialLink(
-  item: CourseMaterialItem
-): Promise<"shared" | "copied"> {
-  if (typeof window === "undefined") return "copied";
-  const canonicalId = item.resourceId || item.id;
-  const shareUrl = `${window.location.origin}/resources?open=${encodeURIComponent(canonicalId)}`;
+  item: Pick<CourseMaterialItem, "id" | "resourceId" | "title" | "courseCode">
+): Promise<"shared" | "copied" | "failed"> {
+  if (typeof window === "undefined") return "failed";
+  const targetId = item.resourceId || item.id;
+  const shareUrl = `${window.location.origin}/resources/${encodeURIComponent(targetId)}`;
 
-  if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+  if (navigator.share) {
     try {
       await navigator.share({
-        title: `${item.courseCode} — ${item.title} | The NUESA Library`,
-        text: `Check out ${item.courseCode}: ${item.title} on The NUESA Library`,
+        title: `${item.courseCode} — ${item.title}`,
+        text: `Study ${item.courseCode}: ${item.title} on NUESApedia`,
         url: shareUrl,
       });
       return "shared";
-    } catch {
-      // User cancelled or Web Share unavailable on desktop; fall through to clipboard
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") return "failed";
     }
   }
 
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+  try {
     await navigator.clipboard.writeText(shareUrl);
+    return "copied";
+  } catch {
+    return "failed";
   }
-  return "copied";
 }
-

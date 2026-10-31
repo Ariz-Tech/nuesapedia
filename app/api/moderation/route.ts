@@ -1,141 +1,100 @@
-import { NextResponse } from "next/server";
-import { getSession, hasModeratorAccess } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 import {
   getAllSubmissions,
+  getSubmissionById,
   updateSubmissionStatus,
-  initDb,
+  findUserById,
 } from "@/lib/db";
+import { deleteR2Object } from "@/lib/r2";
+import { apiError, apiSuccess } from "@/lib/api-helpers";
 
-export const dynamic = "force-dynamic";
-
-/**
- * GET: Retrieve submitted resources for moderation review
- * Query parameters:
- *  - ?status=PENDING_REVIEW | APPROVED | REJECTED | ALL
- */
-export async function GET(request: Request) {
+export async function GET(req: Request) {
   try {
     const session = await getSession();
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Authentication required to access moderation." },
-        { status: 401 }
+    if (!session || (session.role !== "MODERATOR" && session.role !== "ADMIN")) {
+      return apiError(
+        "FORBIDDEN",
+        "Moderator or Admin privileges required.",
+        403
       );
     }
 
-    if (!hasModeratorAccess(session.role)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Access denied. Moderator or Administrator privileges required.",
-          code: "FORBIDDEN",
-        },
-        { status: 403 }
-      );
-    }
-
-    await initDb();
-
-    const { searchParams } = new URL(request.url);
+    const { searchParams } = new URL(req.url);
     const status = searchParams.get("status") || "ALL";
+    const limit = Math.min(300, Math.max(1, parseInt(searchParams.get("limit") || "150", 10) || 150));
+    const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10) || 0);
 
-    const submissions = await getAllSubmissions(status);
-
-    return NextResponse.json({
-      success: true,
-      submissions,
-      currentUserRole: session.role,
-    });
+    const submissions = await getAllSubmissions(status, { limit, offset });
+    return apiSuccess({ submissions });
   } catch (error) {
-    console.error("Moderation list error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to load moderation review queue." },
-      { status: 500 }
-    );
+    console.error("GET /api/moderation error:", error);
+    return apiError("INTERNAL_ERROR", "Internal server error.", 500);
   }
 }
 
-/**
- * PATCH: Review and change the status of a submission (Approve or Reject)
- * Request body:
- *  - submissionId: string
- *  - status: "APPROVED" | "REJECTED"
- *  - rejectionReason?: string (Mandatory if status === "REJECTED")
- */
-export async function PATCH(request: Request) {
+export async function PATCH(req: Request) {
   try {
     const session = await getSession();
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Authentication required." },
-        { status: 401 }
+    if (!session || (session.role !== "MODERATOR" && session.role !== "ADMIN")) {
+      return apiError(
+        "FORBIDDEN",
+        "Moderator or Admin privileges required.",
+        403
       );
     }
 
-    if (!hasModeratorAccess(session.role)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Access denied. Moderator or Administrator privileges required.",
-          code: "FORBIDDEN",
-        },
-        { status: 403 }
+    const body = await req.json();
+    const { submissionId, status, rejectionReason } = body ?? {};
+
+    if (!submissionId || (status !== "APPROVED" && status !== "REJECTED")) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Valid submissionId and status ('APPROVED' or 'REJECTED') are required.",
+        400
       );
     }
 
-    await initDb();
-
-    const body = await request.json();
-    const { submissionId, status, rejectionReason } = body;
-
-    if (!submissionId) {
-      return NextResponse.json(
-        { success: false, error: "Submission ID is required." },
-        { status: 400 }
+    if (
+      status === "REJECTED" &&
+      (!rejectionReason || String(rejectionReason).trim().length < 5)
+    ) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Please provide a clear rejection reason (at least 5 characters) for the contributor.",
+        400
       );
     }
 
-    if (status !== "APPROVED" && status !== "REJECTED") {
-      return NextResponse.json(
-        { success: false, error: "Invalid status. Must be APPROVED or REJECTED." },
-        { status: 400 }
-      );
+    const existing = await getSubmissionById(String(submissionId));
+    if (!existing) {
+      return apiError("NOT_FOUND", "Submission not found.", 404);
     }
 
-    if (status === "REJECTED" && (!rejectionReason || !rejectionReason.trim())) {
-      return NextResponse.json(
-        { success: false, error: "Please provide a rejection reason to inform the student." },
-        { status: 400 }
-      );
-    }
+    const reviewer = await findUserById(session.userId);
+    const reviewerLabel = reviewer
+      ? `${reviewer.name} (${session.role})`
+      : session.email;
 
-    const reviewerTag = `${session.name || "Faculty Moderator"} (${session.role})`;
-
-    const updated = await updateSubmissionStatus(submissionId, status, {
-      rejectionReason: status === "REJECTED" ? rejectionReason.trim() : undefined,
-      reviewedBy: reviewerTag,
-    });
+    const updated = await updateSubmissionStatus(
+      String(submissionId),
+      status,
+      reviewerLabel,
+      status === "REJECTED" ? String(rejectionReason).trim().slice(0, 500) : undefined,
+      session.userId
+    );
 
     if (!updated) {
-      return NextResponse.json(
-        { success: false, error: "Submission not found." },
-        { status: 404 }
-      );
+      return apiError("NOT_FOUND", "Submission not found.", 404);
     }
 
-    return NextResponse.json({
-      success: true,
-      message:
-        status === "APPROVED"
-          ? "Resource approved successfully and added to the official department library."
-          : "Resource rejected. The contributor has been notified of the rejection reason.",
-      submission: updated,
-    });
+    // Garbage-collect rejected R2 objects so rejected uploads don't leak storage costs
+    if (status === "REJECTED" && existing.r2Key) {
+      await deleteR2Object(existing.r2Key);
+    }
+
+    return apiSuccess({ submission: updated });
   } catch (error) {
-    console.error("Moderation review action error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to process moderation action." },
-      { status: 500 }
-    );
+    console.error("PATCH /api/moderation error:", error);
+    return apiError("INTERNAL_ERROR", "Internal server error.", 500);
   }
 }

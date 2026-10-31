@@ -1,74 +1,84 @@
-import { NextResponse } from "next/server";
-import { findUserByEmail, initDb } from "@/lib/db";
-import { verifyPassword, createSessionToken, COOKIE_NAME } from "@/lib/auth";
+import { findUserByEmail, isConfiguredAdminEmail } from "@/lib/db";
+import {
+  verifyPassword,
+  createSessionToken,
+  sessionCookieOptions,
+} from "@/lib/auth";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { apiError, apiSuccess } from "@/lib/api-helpers";
+import { getReadyDb, isDevMemoryMode, devStore } from "@/lib/db/pool";
 
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
-    // 1. Rate limiting check (Max 10 login attempts per minute per IP)
-    const clientIp = getClientIp(request);
-    const rateLimit = checkRateLimit(`login_${clientIp}`, {
-      intervalMs: 60000,
-      maxRequests: 10,
+    const ip = getClientIp(req);
+    const ipRate = await checkRateLimit(`login:ip:${ip}`, {
+      limit: 10,
+      windowMs: 15 * 60 * 1000,
     });
-
-    if (!rateLimit.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Too many login attempts. Please wait ${Math.ceil(
-            rateLimit.resetMs / 1000
-          )} seconds before trying again.`,
-        },
-        {
-          status: 429,
-          headers: {
-            "Retry-After": Math.ceil(rateLimit.resetMs / 1000).toString(),
-          },
-        }
+    if (!ipRate.allowed) {
+      return apiError(
+        "RATE_LIMITED",
+        `Too many login attempts. Please try again in ${ipRate.retryAfterSeconds} seconds.`,
+        429,
+        { "Retry-After": String(ipRate.retryAfterSeconds) }
       );
     }
 
-    await initDb();
-    const body = await request.json();
-    const { email, password } = body;
+    const body = await req.json();
+    const { email, password } = body ?? {};
 
-    if (!email || !password || typeof email !== "string" || typeof password !== "string") {
-      return NextResponse.json(
-        { success: false, error: "Email and password are required." },
-        { status: 400 }
+    if (!email || !password) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Email and password are required.",
+        400
       );
     }
 
-    const cleanEmail = email.trim().toLowerCase();
-    const user = await findUserByEmail(cleanEmail);
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const emailRate = await checkRateLimit(`login:email:${normalizedEmail}`, {
+      limit: 8,
+      windowMs: 15 * 60 * 1000,
+    });
+    if (!emailRate.allowed) {
+      return apiError(
+        "RATE_LIMITED",
+        `Too many login attempts for this account. Please try again in ${emailRate.retryAfterSeconds} seconds.`,
+        429,
+        { "Retry-After": String(emailRate.retryAfterSeconds) }
+      );
+    }
+
+    const user = await findUserByEmail(normalizedEmail);
     if (!user) {
-      return NextResponse.json(
-        { success: false, error: "Invalid email or password." },
-        { status: 401 }
-      );
+      return apiError("INVALID_CREDENTIALS", "Invalid email or password.", 401);
     }
 
-    // 2. Strict password verification (Never allow empty or unverified passwords)
-    const isPasswordValid = user.password ? await verifyPassword(password, user.password) : false;
-    if (!isPasswordValid) {
-      return NextResponse.json(
-        { success: false, error: "Invalid email or password." },
-        { status: 401 }
-      );
+    const isValid = await verifyPassword(String(password), user.password);
+    if (!isValid) {
+      return apiError("INVALID_CREDENTIALS", "Invalid email or password.", 401);
     }
 
-    // 3. Create secure session token
+    let effectiveRole = user.role;
+    if (isConfiguredAdminEmail(user.email) && user.role !== "ADMIN") {
+      effectiveRole = "ADMIN";
+      if (isDevMemoryMode()) {
+        const u = devStore.users.get(normalizedEmail);
+        if (u) u.role = "ADMIN";
+      } else {
+        const db = await getReadyDb();
+        await db.query(`UPDATE users SET role = 'ADMIN' WHERE id = $1`, [user.id]);
+      }
+    }
+
     const token = createSessionToken({
-      id: user.id,
+      userId: user.id,
       email: user.email,
-      name: user.name,
-      role: user.role,
+      role: effectiveRole,
+      sessionVersion: user.sessionVersion,
     });
 
-    const response = NextResponse.json({
-      success: true,
-      message: "Login successful",
+    const response = apiSuccess({
       user: {
         id: user.id,
         name: user.name,
@@ -76,27 +86,18 @@ export async function POST(request: Request) {
         department: user.department,
         level: user.level,
         avatar: user.avatar,
-        role: user.role,
+        role: effectiveRole,
       },
     });
 
-    // 4. Set HTTP-only cookie with production security flags
-    response.cookies.set({
-      name: COOKIE_NAME,
-      value: token,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 7 * 24 * 60 * 60,
-    });
-
+    response.cookies.set(sessionCookieOptions(token));
     return response;
   } catch (error) {
     console.error("Login error:", error);
-    return NextResponse.json(
-      { success: false, error: "An unexpected error occurred during login." },
-      { status: 500 }
+    return apiError(
+      "INTERNAL_ERROR",
+      "Unable to sign in right now. Please try again shortly.",
+      500
     );
   }
 }

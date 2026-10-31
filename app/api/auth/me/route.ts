@@ -1,29 +1,23 @@
-import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { findUserById, getSavedResources, updateUser } from "@/lib/db";
+import { findUserById, updateUser } from "@/lib/db";
+import { DEPARTMENTS } from "@/lib/departments";
+import { apiError, apiSuccess } from "@/lib/api-helpers";
+
+const VALID_LEVELS = ["100L", "200L", "300L", "400L", "500L"];
 
 export async function GET() {
   try {
     const session = await getSession();
     if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Not authenticated" },
-        { status: 401 }
-      );
+      return apiError("UNAUTHORIZED", "Not authenticated.", 401);
     }
 
     const user = await findUserById(session.userId);
     if (!user) {
-      return NextResponse.json(
-        { success: false, error: "User not found" },
-        { status: 404 }
-      );
+      return apiError("NOT_FOUND", "User not found.", 404);
     }
 
-    const savedResources = await getSavedResources(user.id);
-
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       user: {
         id: user.id,
         name: user.name,
@@ -31,51 +25,79 @@ export async function GET() {
         department: user.department,
         level: user.level,
         avatar: user.avatar,
-        role: user.role,
+        role: session.role,
         createdAt: user.createdAt,
       },
-      savedResources,
     });
   } catch (error) {
-    console.error("Get profile error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to load user profile" },
-      { status: 500 }
-    );
+    console.error("Get me error:", error);
+    return apiError("INTERNAL_ERROR", "Internal server error.", 500);
   }
 }
 
-export async function PUT(request: Request) {
+export async function PATCH(req: Request) {
   try {
     const session = await getSession();
     if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Not authenticated" },
-        { status: 401 }
-      );
+      return apiError("UNAUTHORIZED", "Not authenticated.", 401);
     }
 
-    const body = await request.json();
-    const { name, department, level, avatar } = body;
+    const body = await req.json();
+    const { name, department, level, avatar } = body ?? {};
 
-    const updateData: Partial<{ name: string; department: string; level: string; avatar: string }> = {};
-    if (typeof name === "string" && name.trim()) updateData.name = name.trim();
-    if (typeof department === "string" && department.trim()) updateData.department = department.trim();
-    if (typeof level === "string" && level.trim()) updateData.level = level.trim();
-    if (typeof avatar === "string" && avatar.trim()) updateData.avatar = avatar.trim();
+    const cleanUpdates: {
+      name?: string;
+      department?: string;
+      level?: string;
+      avatar?: string;
+    } = {};
 
-    const updated = await updateUser(session.userId, updateData);
+    if (name !== undefined) {
+      const trimmed = String(name).trim();
+      if (trimmed.length < 2 || trimmed.length > 100) {
+        return apiError(
+          "VALIDATION_ERROR",
+          "Name must be between 2 and 100 characters.",
+          400
+        );
+      }
+      cleanUpdates.name = trimmed;
+    }
 
+    if (department !== undefined) {
+      if (!DEPARTMENTS.includes(department as (typeof DEPARTMENTS)[number])) {
+        return apiError(
+          "VALIDATION_ERROR",
+          "Invalid engineering department.",
+          400
+        );
+      }
+      cleanUpdates.department = department;
+    }
+
+    if (level !== undefined) {
+      if (!VALID_LEVELS.includes(String(level))) {
+        return apiError("VALIDATION_ERROR", "Invalid academic level.", 400);
+      }
+      cleanUpdates.level = String(level);
+    }
+
+    if (avatar !== undefined) {
+      if (
+        typeof avatar !== "string" ||
+        !avatar.startsWith("https://api.dicebear.com/")
+      ) {
+        return apiError("VALIDATION_ERROR", "Invalid avatar URL.", 400);
+      }
+      cleanUpdates.avatar = avatar;
+    }
+
+    const updated = await updateUser(session.userId, cleanUpdates);
     if (!updated) {
-      return NextResponse.json(
-        { success: false, error: "User not found" },
-        { status: 404 }
-      );
+      return apiError("NOT_FOUND", "User not found.", 404);
     }
 
-    return NextResponse.json({
-      success: true,
-      message: "Profile updated successfully",
+    return apiSuccess({
       user: {
         id: updated.id,
         name: updated.name,
@@ -83,14 +105,15 @@ export async function PUT(request: Request) {
         department: updated.department,
         level: updated.level,
         avatar: updated.avatar,
-        role: updated.role,
+        role: session.role,
+        createdAt: updated.createdAt,
       },
     });
   } catch (error) {
     console.error("Update profile error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to update profile" },
-      { status: 500 }
-    );
+    return apiError("INTERNAL_ERROR", "Internal server error.", 500);
   }
 }
+
+export const PUT = PATCH;
+

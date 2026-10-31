@@ -72,6 +72,19 @@ export const DEPARTMENT_DETAILS: DepartmentInfo[] = [
   },
 ];
 
+export const DEPARTMENT_RECORDS = DEPARTMENT_DETAILS;
+
 export function getDepartmentBySlug(slug: string): DepartmentInfo | undefined {
   return DEPARTMENT_DETAILS.find((d) => d.slug.toLowerCase() === slug.toLowerCase());
+}
+
+export function resolveDepartment(identifier: string): DepartmentInfo | undefined {
+  const key = identifier.trim().toLowerCase();
+  return DEPARTMENT_DETAILS.find(
+    (d) =>
+      d.slug.toLowerCase() === key ||
+      d.id.toLowerCase() === key ||
+      d.code.toLowerCase() === key ||
+      d.name.toLowerCase() === key
+  );
 }

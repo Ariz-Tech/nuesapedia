@@ -3,30 +3,37 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID || "";
-const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID || process.env.R2_KEY || "";
-const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY || process.env.R2_SECRET || "";
-const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || "nuesapedia-storage";
-const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || "";
-
-/**
- * Check if Cloudflare R2 credentials are configured
- */
-export function isR2Configured(): boolean {
-  return Boolean(R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET_NAME);
+function cleanCredential(val: string | undefined): string {
+  const trimmed = (val || "").trim();
+  if (!trimmed || trimmed.toLowerCase().startsWith("your_")) {
+    return "";
+  }
+  return trimmed;
 }
 
-let r2ClientInstance: S3Client | null = null;
+const R2_ACCOUNT_ID = cleanCredential(process.env.R2_ACCOUNT_ID);
+const R2_ACCESS_KEY_ID = cleanCredential(process.env.R2_ACCESS_KEY_ID);
+const R2_SECRET_ACCESS_KEY = cleanCredential(process.env.R2_SECRET_ACCESS_KEY);
+export const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || "nuesapedia-resources";
+export const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || "";
 
-/**
- * Get configured S3 client connected to Cloudflare R2
- */
-export function getR2Client(): S3Client {
-  if (!r2ClientInstance) {
-    r2ClientInstance = new S3Client({
+export const MAX_PDF_UPLOAD_BYTES = 30 * 1024 * 1024; // 30 MB
+
+export const isR2Configured = Boolean(
+  R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET_NAME
+);
+
+let s3Client: S3Client | null = null;
+
+export function getR2Client(): S3Client | null {
+  if (!isR2Configured) return null;
+  if (!s3Client) {
+    s3Client = new S3Client({
       region: "auto",
       endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       credentials: {
@@ -35,131 +42,191 @@ export function getR2Client(): S3Client {
       },
     });
   }
-  return r2ClientInstance;
+  return s3Client;
 }
 
 /**
- * Generate a pre-signed PUT upload URL for direct-to-R2 upload from client browser
- * As documented in docs/flow.md and docs/API_SPEC.md (Section 15.1)
+ * Generates a short-lived pre-signed PUT URL for direct browser upload to Cloudflare R2.
  */
-export async function generateSignedUploadUrl(
-  key: string,
-  contentType: string = "application/pdf",
-  expiresInSeconds: number = 900 // 15 minutes
-): Promise<{ uploadUrl: string; key: string; expiresIn: number }> {
-  if (!isR2Configured()) {
-    throw new Error(
-      "Cloudflare R2 is not configured. Please set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME in your environment variables."
-    );
+export async function generateSignedUploadUrl(params: {
+  key: string;
+  contentType: string;
+  expiresInSeconds?: number;
+}): Promise<string | null> {
+  const client = getR2Client();
+  if (!client) return null;
+
+  const command = new PutObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: params.key,
+    ContentType: params.contentType,
+  });
+
+  return getSignedUrl(client, command, {
+    expiresIn: params.expiresInSeconds || 600,
+  });
+}
+
+/**
+ * Generates a fresh short-lived signed URL on demand for viewing (`inline`) or downloading (`attachment`).
+ * NEVER store the returned signed URL in PostgreSQL.
+ */
+export async function getSignedDownloadUrl(params: {
+  key: string;
+  fileName?: string;
+  disposition?: "inline" | "attachment";
+  expiresInSeconds?: number;
+}): Promise<string | null> {
+  const disposition = params.disposition || "attachment";
+
+  if (disposition === "inline" && R2_PUBLIC_URL) {
+    return `${R2_PUBLIC_URL.replace(/\/$/, "")}/${params.key}`;
   }
 
   const client = getR2Client();
-  const command = new PutObjectCommand({
+  if (!client) {
+    if (process.env.NODE_ENV !== "production") {
+      return `/api/uploads/mock-r2?key=${encodeURIComponent(params.key)}`;
+    }
+    return null;
+  }
+
+  const safeName = (params.fileName || "nuesapedia-resource.pdf").replace(
+    /[^a-zA-Z0-9._-]/g,
+    "_"
+  );
+
+  const command = new GetObjectCommand({
     Bucket: R2_BUCKET_NAME,
-    Key: key,
-    ContentType: contentType,
+    Key: params.key,
+    ResponseContentType: "application/pdf",
+    ResponseContentDisposition: `${disposition}; filename="${safeName}"`,
   });
 
-  const uploadUrl = await getSignedUrl(client, command, {
-    expiresIn: expiresInSeconds,
+  return getSignedUrl(client, command, {
+    expiresIn: params.expiresInSeconds || 900, // 15 minutes
   });
+}
 
-  return {
-    uploadUrl,
-    key,
-    expiresIn: expiresInSeconds,
-  };
+export interface VerifiedR2Object {
+  valid: boolean;
+  sizeBytes?: number;
+  error?: string;
 }
 
 /**
- * Generate a pre-signed GET download URL or return public URL
+ * Verifies server-side that an uploaded R2 object actually exists, respects the 30MB cap,
+ * and starts with the `%PDF-` magic header (`0x25 0x50 0x44 0x46 0x2D`).
  */
-export async function getFileUrl(
+export async function verifyR2PdfObject(
   key: string,
-  expiresInSeconds: number = 3600
-): Promise<string> {
-  // If custom public domain or R2 dev subdomain is configured, use it directly
-  if (R2_PUBLIC_URL) {
-    const cleanBase = R2_PUBLIC_URL.replace(/\/$/, "");
-    const cleanKey = key.replace(/^\//, "");
-    return `${cleanBase}/${cleanKey}`;
+  maxBytes: number = MAX_PDF_UPLOAD_BYTES
+): Promise<VerifiedR2Object> {
+  const client = getR2Client();
+  if (!client) {
+    return { valid: false, error: "Cloudflare R2 is not configured." };
   }
 
-  // Otherwise generate pre-signed read URL
-  if (isR2Configured()) {
-    const client = getR2Client();
-    const command = new GetObjectCommand({
-      Bucket: R2_BUCKET_NAME,
-      Key: key,
-    });
-    return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
-  }
-
-  return "";
-}
-
-/**
- * Generate a pre-signed GET URL that forces browser file download (Content-Disposition: attachment)
- */
-export async function getSignedDownloadUrl(
-  key: string,
-  filename: string,
-  expiresInSeconds: number = 900
-): Promise<string> {
-  if (isR2Configured()) {
-    const client = getR2Client();
-    const safeName = filename.replace(/["\r\n]/g, "_");
-    const command = new GetObjectCommand({
-      Bucket: R2_BUCKET_NAME,
-      Key: key,
-      ResponseContentDisposition: `attachment; filename="${safeName}"`,
-    });
-    return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
-  }
-
-  if (R2_PUBLIC_URL) {
-    const cleanBase = R2_PUBLIC_URL.replace(/\/$/, "");
-    const cleanKey = key.replace(/^\//, "");
-    return `${cleanBase}/${cleanKey}`;
-  }
-
-  return "";
-}
-
-/**
- * Generate a pre-signed inline GET URL for in-browser reading/viewing (Content-Disposition: inline)
- */
-export async function getSignedViewUrl(
-  key: string,
-  expiresInSeconds: number = 900
-): Promise<string> {
-  if (isR2Configured()) {
-    const client = getR2Client();
-    const command = new GetObjectCommand({
-      Bucket: R2_BUCKET_NAME,
-      Key: key,
-      ResponseContentDisposition: "inline",
-      ResponseContentType: "application/pdf",
-    });
-    return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
-  }
-
-  return getFileUrl(key, expiresInSeconds);
-}
-
-/**
- * Delete an object from Cloudflare R2 storage
- */
-export async function deleteR2Object(key: string): Promise<void> {
-  if (!isR2Configured()) return;
   try {
-    const client = getR2Client();
-    const command = new DeleteObjectCommand({
-      Bucket: R2_BUCKET_NAME,
-      Key: key,
-    });
-    await client.send(command);
+    const head = await client.send(
+      new HeadObjectCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+      })
+    );
+
+    const sizeBytes = Number(head.ContentLength ?? 0);
+    if (sizeBytes <= 0) {
+      return { valid: false, error: "Uploaded file is empty." };
+    }
+    if (sizeBytes > maxBytes) {
+      return {
+        valid: false,
+        sizeBytes,
+        error: `Uploaded file exceeds maximum allowed size of ${Math.round(maxBytes / (1024 * 1024))}MB.`,
+      };
+    }
+
+    const rangeRes = await client.send(
+      new GetObjectCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+        Range: "bytes=0-4",
+      })
+    );
+
+    const bytes = await rangeRes.Body?.transformToByteArray();
+    if (!bytes || bytes.length < 5) {
+      return { valid: false, sizeBytes, error: "Uploaded file is too small to be a valid PDF." };
+    }
+
+    const magic = Buffer.from(bytes.slice(0, 5)).toString("ascii");
+    if (magic !== "%PDF-") {
+      return {
+        valid: false,
+        sizeBytes,
+        error: "Invalid file signature: uploaded file is not a valid PDF document.",
+      };
+    }
+
+    return { valid: true, sizeBytes };
   } catch (err) {
-    console.error("Cloudflare R2 deletion error:", err);
+    const code = (err as { name?: string })?.name;
+    if (code === "NotFound" || code === "NoSuchKey") {
+      return { valid: false, error: "Upload not found in storage. Please try uploading again." };
+    }
+    console.error("verifyR2PdfObject error:", err);
+    return { valid: false, error: "Could not verify uploaded file in storage." };
+  }
+}
+
+export async function deleteR2Object(key: string): Promise<boolean> {
+  const client = getR2Client();
+  if (!client) return false;
+
+  try {
+    await client.send(
+      new DeleteObjectCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+      })
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function checkR2Health(): Promise<{
+  configured: boolean;
+  reachable: boolean;
+  bucket: string;
+  mode: "cloudflare_r2" | "local_dev_mock" | "unconfigured";
+}> {
+  if (!isR2Configured) {
+    return {
+      configured: false,
+      reachable: process.env.NODE_ENV !== "production",
+      bucket: R2_BUCKET_NAME,
+      mode: process.env.NODE_ENV !== "production" ? "local_dev_mock" : "unconfigured",
+    };
+  }
+
+  const client = getR2Client()!;
+  try {
+    await client.send(new HeadBucketCommand({ Bucket: R2_BUCKET_NAME }));
+    return {
+      configured: true,
+      reachable: true,
+      bucket: R2_BUCKET_NAME,
+      mode: "cloudflare_r2",
+    };
+  } catch {
+    return {
+      configured: true,
+      reachable: false,
+      bucket: R2_BUCKET_NAME,
+      mode: "cloudflare_r2",
+    };
   }
 }

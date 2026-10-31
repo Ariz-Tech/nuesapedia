@@ -1,86 +1,87 @@
-import { NextResponse } from "next/server";
+import crypto from "node:crypto";
 import { getSession } from "@/lib/auth";
 import {
-  createSubmission,
   getUserSubmissions,
-  deleteSubmission,
-  initDb,
+  createSubmission,
+  deleteSubmissionWithChecks,
 } from "@/lib/db";
 import {
   generateSignedUploadUrl,
-  isR2Configured,
   deleteR2Object,
-  getFileUrl,
+  isR2Configured,
+  MAX_PDF_UPLOAD_BYTES,
 } from "@/lib/r2";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { DEPARTMENTS } from "@/lib/departments";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import {
+  apiError,
+  apiSuccess,
+  extractYouTubeId,
+  formatBytes,
+  parseSizeToBytes,
+} from "@/lib/api-helpers";
 
-export const dynamic = "force-dynamic";
+const VALID_LEVELS = ["100L", "200L", "300L", "400L", "500L"];
+const VALID_SEMESTERS = ["First Semester", "Second Semester"];
+const VALID_MEDIUMS = ["PDF", "YOUTUBE"] as const;
+const VALID_MATERIAL_TYPES = [
+  "Lecture Note",
+  "Lecture Notes",
+  "Past Question",
+  "Past Questions",
+  "Textbook",
+  "Textbooks",
+  "Lab Manual",
+  "Formula Sheet / Summary",
+  "Tutorial / Problem Set",
+  "Full Lecture Recording",
+  "Concept / Topic Explainer",
+  "Past Question Solution Walkthrough",
+  "Software / CAD / Simulation Tutorial",
+  "Video Tutorial",
+];
 
-function extractYouTubeId(url: string): string | null {
-  if (!url) return null;
-  const regExp = /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/;
-  const match = url.match(regExp);
-  return match ? match[1] : null;
-}
-
-/**
- * GET /api/uploads: Fetch submissions created by the authenticated user
- */
 export async function GET() {
   try {
     const session = await getSession();
     if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Not authenticated" },
-        { status: 401 }
-      );
+      return apiError("UNAUTHORIZED", "Authentication required.", 401);
     }
 
-    await initDb();
     const submissions = await getUserSubmissions(session.userId);
-
-    return NextResponse.json({
-      success: true,
-      submissions,
-    });
+    return apiSuccess({ submissions });
   } catch (error) {
-    console.error("Get submissions error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch student submissions" },
-      { status: 500 }
-    );
+    console.error("GET /api/uploads error:", error);
+    return apiError("INTERNAL_ERROR", "Internal server error.", 500);
   }
 }
 
-/**
- * POST /api/uploads:
- * Flow 3, Step 2: Student inputs metadata -> API generates Signed R2 Upload URL (docs/flow.md)
- */
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
     const session = await getSession();
     if (!session) {
-      return NextResponse.json(
-        { success: false, error: "You must be signed in to submit academic resources." },
-        { status: 401 }
+      return apiError(
+        "UNAUTHORIZED",
+        "You must be signed in to contribute academic resources.",
+        401
       );
     }
 
-    // Rate limiting: Max 20 submissions per hour per user
-    const rateLimit = checkRateLimit(`upload_${session.userId}`, {
-      intervalMs: 3600000,
-      maxRequests: 20,
+    const ip = getClientIp(req);
+    const rate = await checkRateLimit(`upload:${session.userId}:${ip}`, {
+      limit: 15,
+      windowMs: 15 * 60 * 1000,
     });
-    if (!rateLimit.success) {
-      return NextResponse.json(
-        { success: false, error: "Submission rate limit exceeded. Please try again later." },
-        { status: 429 }
+    if (!rate.allowed) {
+      return apiError(
+        "RATE_LIMITED",
+        `Upload rate limit reached. Please wait ${rate.retryAfterSeconds} seconds.`,
+        429,
+        { "Retry-After": String(rate.retryAfterSeconds) }
       );
     }
 
-    await initDb();
-
-    const body = await request.json();
+    const body = await req.json();
     const {
       title,
       courseCode,
@@ -89,187 +90,245 @@ export async function POST(request: Request) {
       semester,
       sessionYear,
       type,
-      medium = "PDF",
-      description = "",
+      medium,
+      description,
       fileName,
       fileSize,
-      contentType = "application/pdf",
+      fileSizeBytes: rawSizeBytes,
+      contentType,
       youtubeUrl,
-    } = body;
+    } = body ?? {};
 
-    if (!title || !courseCode || !department || !level) {
-      return NextResponse.json(
-        { success: false, error: "Missing required academic fields (Title, Course Code, Department, Level)." },
-        { status: 400 }
+    if (!title || !courseCode || !department || !level || !type || !medium) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Title, course code, department, level, material type, and medium are required.",
+        400
       );
     }
 
-    // CASE 1: YOUTUBE VIDEO TUTORIAL (No storage upload required)
+    const trimmedTitle = String(title).trim();
+    if (trimmedTitle.length < 3 || trimmedTitle.length > 200) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Resource title must be between 3 and 200 characters.",
+        400
+      );
+    }
+
+    const cleanCourseCode = String(courseCode).trim().toUpperCase();
+    if (cleanCourseCode.length < 3 || cleanCourseCode.length > 20) {
+      return apiError("VALIDATION_ERROR", "Invalid course code.", 400);
+    }
+
+    if (!DEPARTMENTS.includes(department as (typeof DEPARTMENTS)[number])) {
+      return apiError("VALIDATION_ERROR", "Invalid engineering department.", 400);
+    }
+
+    if (!VALID_LEVELS.includes(String(level))) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Invalid academic level (100L - 500L).",
+        400
+      );
+    }
+
+    const cleanSemester = semester ? String(semester) : "First Semester";
+    if (!VALID_SEMESTERS.includes(cleanSemester)) {
+      return apiError("VALIDATION_ERROR", "Invalid semester.", 400);
+    }
+
+    if (!VALID_MATERIAL_TYPES.includes(String(type))) {
+      return apiError("VALIDATION_ERROR", "Invalid material type.", 400);
+    }
+
+    if (!VALID_MEDIUMS.includes(medium)) {
+      return apiError("VALIDATION_ERROR", "Medium must be PDF or YOUTUBE.", 400);
+    }
+
     if (medium === "YOUTUBE") {
       if (!youtubeUrl) {
-        return NextResponse.json(
-          { success: false, error: "Please provide a valid YouTube video URL." },
-          { status: 400 }
+        return apiError(
+          "VALIDATION_ERROR",
+          "A valid YouTube video URL is required.",
+          400
         );
       }
 
-      const videoId = extractYouTubeId(youtubeUrl.trim());
+      const videoId = extractYouTubeId(String(youtubeUrl));
       if (!videoId) {
-        return NextResponse.json(
-          { success: false, error: "Invalid YouTube URL format." },
-          { status: 400 }
+        return apiError(
+          "VALIDATION_ERROR",
+          "Invalid YouTube URL. Please paste a valid youtube.com/watch?v=... or youtu.be/... link.",
+          400
         );
       }
 
-      const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-      const cleanCourseCode = courseCode.trim().toUpperCase();
-
+      const canonicalYoutubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
       const submission = await createSubmission({
         userId: session.userId,
-        title: title.trim(),
+        title: trimmedTitle,
         courseCode: cleanCourseCode,
-        department: department.trim(),
-        level: level.trim(),
-        semester: semester?.trim() || "First Semester",
-        sessionYear: sessionYear?.trim() || undefined,
-        type: type?.trim() || "Video Tutorial",
+        department,
+        level: String(level),
+        semester: cleanSemester,
+        sessionYear: sessionYear ? String(sessionYear).slice(0, 20) : "2025/2026",
+        type,
         medium: "YOUTUBE",
-        description: description?.trim() || "",
-        youtubeUrl: youtubeUrl.trim(),
-        youtubeVideoId: videoId,
-        thumbnailUrl,
-        fileUrl: `https://www.youtube.com/watch?v=${videoId}`,
-        fileName: `YouTube: ${title.trim()}`,
+        description: description ? String(description).trim().slice(0, 1000) : undefined,
+        fileUrl: canonicalYoutubeUrl,
         fileSize: "Streaming Video",
+        youtubeUrl: canonicalYoutubeUrl,
+        youtubeVideoId: videoId,
+        thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
         status: "PENDING_REVIEW",
       });
 
-      return NextResponse.json(
-        {
-          success: true,
-          isComplete: true,
-          message: "YouTube tutorial submitted successfully and routed to faculty moderation queue.",
-          data: {
-            uploadId: submission.id,
-            resourceId: submission.id,
-            submission,
-          },
-        },
-        { status: 201 }
+      return apiSuccess({ submission }, 201);
+    }
+
+    // PDF Direct-to-R2 Flow
+    if (process.env.NODE_ENV === "production" && !isR2Configured) {
+      return apiError(
+        "STORAGE_UNCONFIGURED",
+        "Cloud object storage is not configured on this server.",
+        503
       );
     }
 
-    // CASE 2: CLOUDFLARE R2 SIGNED UPLOAD URL (docs/flow.md Step 2, docs/API_SPEC.md 15.1)
-    if (!fileName || !fileName.toLowerCase().endsWith(".pdf")) {
-      return NextResponse.json(
-        { success: false, error: "Only PDF documents (.pdf) are supported for document upload." },
-        { status: 400 }
+    const safeFileName = (fileName ? String(fileName) : "document.pdf")
+      .replace(/[^a-zA-Z0-9._-]/g, "_")
+      .slice(-120);
+
+    if (!safeFileName.toLowerCase().endsWith(".pdf")) {
+      return apiError("VALIDATION_ERROR", "Only .pdf files are supported.", 400);
+    }
+
+    const declaredBytes =
+      typeof rawSizeBytes === "number" && Number.isFinite(rawSizeBytes)
+        ? Math.round(rawSizeBytes)
+        : parseSizeToBytes(fileSize ? String(fileSize) : null);
+
+    if (declaredBytes !== null && (declaredBytes <= 0 || declaredBytes > MAX_PDF_UPLOAD_BYTES)) {
+      return apiError(
+        "FILE_TOO_LARGE",
+        "PDF file size must be between 1 byte and 30MB.",
+        413
       );
     }
 
-    const uploadId = `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const sanitizedName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const r2Key = `documents/${uploadId}/${sanitizedName}`;
-
-    let uploadUrl: string;
-
-    if (isR2Configured()) {
-      // Real Cloudflare R2 Pre-Signed URL
-      const signed = await generateSignedUploadUrl(r2Key, contentType, 900);
-      uploadUrl = signed.uploadUrl;
-    } else {
-      // Local development mock PUT receiver endpoint
-      const baseUrl = request.headers.get("origin") || "http://localhost:3000";
-      uploadUrl = `${baseUrl}/api/uploads/mock-r2?key=${encodeURIComponent(r2Key)}`;
+    if (contentType && contentType !== "application/pdf") {
+      return apiError("VALIDATION_ERROR", "Content-Type must be application/pdf.", 400);
     }
 
-    // Save initial submission record with status PENDING_REVIEW
-    const initialFileUrl = await getFileUrl(r2Key);
+    const uploadId = `sub_${crypto.randomBytes(8).toString("hex")}`;
+    const deptSlug = department.toLowerCase().replace(/[^a-z0-9]/g, "-");
+    const r2Key = `uploads/${deptSlug}/${cleanCourseCode.replace(/\s+/g, "")}/${uploadId}_${safeFileName}`;
+
+    const signedUploadUrl = isR2Configured
+      ? await generateSignedUploadUrl({
+          key: r2Key,
+          contentType: "application/pdf",
+          expiresInSeconds: 600,
+        })
+      : `/api/uploads/mock-r2?key=${encodeURIComponent(r2Key)}`;
+
+    if (!signedUploadUrl) {
+      return apiError(
+        "STORAGE_ERROR",
+        "Unable to generate upload URL right now.",
+        500
+      );
+    }
+
+    // Start in UPLOADING state so incomplete browser uploads never enter moderators' PENDING_REVIEW queue.
     const submission = await createSubmission({
+      id: uploadId,
       userId: session.userId,
-      title: title.trim(),
-      courseCode: courseCode.trim().toUpperCase(),
-      department: department.trim(),
-      level: level.trim(),
-      semester: semester?.trim() || "First Semester",
-      sessionYear: sessionYear?.trim() || undefined,
-      type: type?.trim() || "Lecture Note",
+      title: trimmedTitle,
+      courseCode: cleanCourseCode,
+      department,
+      level: String(level),
+      semester: cleanSemester,
+      sessionYear: sessionYear ? String(sessionYear).slice(0, 20) : "2025/2026",
+      type,
       medium: "PDF",
-      description: description?.trim() || "",
+      description: description ? String(description).trim().slice(0, 1000) : undefined,
+      fileName: fileName ? String(fileName).slice(0, 255) : safeFileName,
+      fileSize: declaredBytes
+        ? formatBytes(declaredBytes)
+        : fileSize
+          ? String(fileSize).slice(0, 50)
+          : "PDF Document",
+      fileSizeBytes: declaredBytes,
       r2Key,
-      fileName,
-      fileSize: fileSize || "PDF Document",
-      fileUrl: initialFileUrl || `/api/uploads/mock-r2?key=${encodeURIComponent(r2Key)}`,
-      status: "PENDING_REVIEW",
+      status: "UPLOADING",
     });
 
-    return NextResponse.json({
-      success: true,
-      message: "Signed Cloudflare R2 upload URL generated.",
-      data: {
-        uploadId: submission.id,
-        uploadUrl,
-        key: r2Key,
-        expiresIn: 900,
+    return apiSuccess(
+      {
+        submission,
+        signedUploadUrl,
+        r2Key,
+        storageMode: isR2Configured ? "cloudflare_r2" : "local_dev_mock",
+        data: {
+          uploadId: submission.id,
+          uploadUrl: signedUploadUrl,
+          r2Key,
+          submission,
+        },
       },
-    });
+      201
+    );
   } catch (error) {
-    console.error("Upload initialization error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to initiate direct Cloudflare R2 upload." },
-      { status: 500 }
+    console.error("POST /api/uploads error:", error);
+    return apiError(
+      "INTERNAL_ERROR",
+      "Failed to register academic contribution.",
+      500
     );
   }
 }
 
-/**
- * DELETE /api/uploads?id=...
- */
-export async function DELETE(request: Request) {
+export async function DELETE(req: Request) {
   try {
     const session = await getSession();
     if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Not authenticated" },
-        { status: 401 }
-      );
+      return apiError("UNAUTHORIZED", "Authentication required.", 401);
     }
 
-    const { searchParams } = new URL(request.url);
-    const submissionId = searchParams.get("id");
-
-    if (!submissionId) {
-      return NextResponse.json(
-        { success: false, error: "Submission ID is required" },
-        { status: 400 }
-      );
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    if (!id) {
+      return apiError("VALIDATION_ERROR", "Submission ID is required.", 400);
     }
 
-    await initDb();
-    const userSubmissions = await getUserSubmissions(session.userId);
-    const target = userSubmissions.find((s) => s.id === submissionId);
-
-    if (target?.r2Key) {
-      await deleteR2Object(target.r2Key);
-    }
-
-    const deleted = await deleteSubmission(session.userId, submissionId);
-    if (!deleted) {
-      return NextResponse.json(
-        { success: false, error: "Submission not found or unauthorized" },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: "Submission removed successfully",
-    });
-  } catch (error) {
-    console.error("Delete submission error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to delete submission" },
-      { status: 500 }
+    const result = await deleteSubmissionWithChecks(
+      { userId: session.userId, role: session.role },
+      id
     );
+
+    if (!result.deleted) {
+      if (result.reason === "ALREADY_APPROVED") {
+        return apiError(
+          "FORBIDDEN",
+          "Approved public library resources cannot be deleted by contributors. Please use 'Report Issue' if an update or takedown is needed.",
+          403
+        );
+      }
+      if (result.reason === "FORBIDDEN") {
+        return apiError("FORBIDDEN", "You cannot delete another user's submission.", 403);
+      }
+      return apiError("NOT_FOUND", "Submission not found.", 404);
+    }
+
+    if (result.r2Key) {
+      await deleteR2Object(result.r2Key);
+    }
+
+    return apiSuccess({ message: "Submission withdrawn." });
+  } catch (error) {
+    console.error("DELETE /api/uploads error:", error);
+    return apiError("INTERNAL_ERROR", "Internal server error.", 500);
   }
 }

@@ -1,107 +1,141 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   X,
-  Download,
   Bookmark,
+  Download,
   ExternalLink,
-  FileText,
-  Play,
-  Loader2,
-  Maximize2,
-  HardDriveDownload,
-  WifiOff,
   Share2,
   Check,
+  CheckCircle2,
   Flag,
+  Loader2,
+  FileText,
+  Play,
+  WifiOff,
+  HardDriveDownload,
+  Maximize2,
 } from "lucide-react";
-import { resolveCourseMetadata } from "@/lib/courses";
 import {
   type CourseMaterialItem,
   extractYoutubeId,
+  getMaterialViewUrl,
   shareOrCopyMaterialLink,
 } from "@/lib/saved-client";
-import { getResourceBadgeStyle } from "@/lib/badge-styles";
-import { getOfflineDocument, saveReadingProgress } from "@/lib/offline-vault";
+import {
+  getOfflineDocument,
+  getReadingProgress,
+  saveReadingProgress,
+} from "@/lib/offline-vault";
 import { useSavedResources } from "@/context/SavedResourcesContext";
-
-const REPORT_REASONS = [
-  "Broken or corrupt file",
-  "Wrong course code or department",
-  "Missing or illegible pages",
-  "Duplicate material",
-];
+import { getResourceBadgeStyle } from "@/lib/badge-styles";
+import { resolveCourseMetadata } from "@/lib/courses";
+import { extractApiError } from "@/lib/api-helpers";
 
 interface ResourceViewerModalProps {
   material: CourseMaterialItem | null;
-  isBookmarked: boolean;
-  isTogglingBookmark?: boolean;
-  onToggleBookmark: (item: CourseMaterialItem) => void;
   onClose: () => void;
+  isBookmarked: boolean;
+  onToggleBookmark: (item: CourseMaterialItem) => void;
+  isTogglingBookmark?: boolean;
 }
 
-export default function ResourceViewerModal({
+const REPORT_REASONS = [
+  "Corrupted or unreadable PDF",
+  "Wrong course code or department",
+  "Duplicate or outdated material",
+  "Broken video link",
+  "Inappropriate content",
+];
+
+export default function ResourceViewerModal(props: ResourceViewerModalProps) {
+  if (!props.material) return null;
+  const key = props.material.resourceId || props.material.id;
+  return <ResourceViewerModalOpen key={key} {...props} material={props.material} />;
+}
+
+function ResourceViewerModalOpen({
   material,
-  isBookmarked,
-  isTogglingBookmark = false,
-  onToggleBookmark,
   onClose,
-}: ResourceViewerModalProps) {
-  const { isOfflineAvailable, downloadingIds, downloadMaterial, isOffline } =
+  isBookmarked,
+  onToggleBookmark,
+  isTogglingBookmark = false,
+}: Omit<ResourceViewerModalProps, "material"> & { material: CourseMaterialItem }) {
+  const { isOfflineAvailable, downloadMaterial, downloadingIds, isOffline } =
     useSavedResources();
 
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [offlineBlobUrl, setOfflineBlobUrl] = useState<string | null>(null);
-  const [checkingOffline, setCheckingOffline] = useState<boolean>(false);
-  const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  const [checkingOffline, setCheckingOffline] = useState<boolean>(
+    material.medium !== "YOUTUBE"
+  );
+  const [readingPct, setReadingPct] = useState<number>(0);
 
-  // Issue report bar state
+  const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [showReportBar, setShowReportBar] = useState<boolean>(false);
   const [reportReason, setReportReason] = useState<string>(REPORT_REASONS[0]);
   const [reportDetails, setReportDetails] = useState<string>("");
   const [submittingReport, setSubmittingReport] = useState<boolean>(false);
   const [reportSubmitted, setReportSubmitted] = useState<boolean>(false);
+  const [reportError, setReportError] = useState<string | null>(null);
 
-  // Escape key & scroll lock
+  const canonicalId = material.resourceId || material.id;
+  const isVideo = material.medium === "YOUTUBE";
+
+  // Escape key, Tab focus trap, and body scroll lock
   useEffect(() => {
-    if (!material) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
+    const prevActive = document.activeElement as HTMLElement | null;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key === "Tab" && dialogRef.current) {
+        const focusables = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       document.body.style.overflow = prevOverflow;
       window.removeEventListener("keydown", handleKeyDown);
+      prevActive?.focus?.();
     };
-  }, [material, onClose]);
+  }, [onClose]);
 
-  // Reset transient UI state & load cached PDF Blob from IndexedDB
+  // Load cached PDF Blob from IndexedDB & existing reading progress (honest tracking)
   useEffect(() => {
     let active = true;
     let createdObjectUrl: string | null = null;
+    let studyTimer: number | undefined;
 
-    setCopiedLink(false);
-    setShowReportBar(false);
-    setReportSubmitted(false);
-    setReportDetails("");
+    (async () => {
+      const existingProgress = await getReadingProgress(canonicalId);
+      if (active && existingProgress) {
+        setReadingPct(existingProgress.percentage);
+      }
 
-    async function resolveViewerSource() {
-      if (!material) {
-        setOfflineBlobUrl(null);
+      if (isVideo) {
+        if (active) setCheckingOffline(false);
         return;
       }
 
-      const canonicalId = material.resourceId || material.id;
-      saveReadingProgress(canonicalId, 100, 1).catch(() => {});
-
-      if (material.medium === "YOUTUBE") {
-        setOfflineBlobUrl(null);
-        return;
-      }
-
-      setCheckingOffline(true);
       try {
         const record = await getOfflineDocument(canonicalId);
         if (!active) return;
@@ -114,24 +148,32 @@ export default function ResourceViewerModal({
       } finally {
         if (active) setCheckingOffline(false);
       }
-    }
 
-    resolveViewerSource();
+      // Record "In Progress (25%)" only after 5 seconds of actual PDF viewing if not started
+      if (active && (!existingProgress || existingProgress.percentage === 0)) {
+        studyTimer = window.setTimeout(() => {
+          if (!active) return;
+          setReadingPct((prev) => {
+            if (prev > 0) return prev;
+            void saveReadingProgress(canonicalId, 25, 1);
+            return 25;
+          });
+        }, 5000);
+      }
+    })();
 
     return () => {
       active = false;
+      if (studyTimer) window.clearTimeout(studyTimer);
       if (createdObjectUrl) {
         URL.revokeObjectURL(createdObjectUrl);
       }
     };
-  }, [material, isOffline]);
+  }, [canonicalId, isVideo, isOffline]);
 
-  if (!material) return null;
-
-  const canonicalId = material.resourceId || material.id;
-  const isVideo = material.medium === "YOUTUBE";
   const videoId =
-    extractYoutubeId(material.youtubeVideoId) || extractYoutubeId(material.youtubeUrl);
+    extractYoutubeId(material.youtubeVideoId) ||
+    extractYoutubeId(material.youtubeUrl);
   const youtubeWatchUrl =
     material.youtubeUrl ||
     (videoId ? `https://www.youtube.com/watch?v=${videoId}` : undefined);
@@ -145,8 +187,9 @@ export default function ResourceViewerModal({
 
   const cachedOffline = isOfflineAvailable(canonicalId) || Boolean(offlineBlobUrl);
   const isDownloading = downloadingIds.has(canonicalId);
-  const canDownloadPdf = !isVideo && (Boolean(material.fileUrl) || cachedOffline);
-  const pdfSrc = offlineBlobUrl || (!isOffline ? material.fileUrl : undefined);
+  const onlinePdfViewUrl = getMaterialViewUrl(material);
+  const canDownloadPdf = !isVideo && (!isOffline || cachedOffline);
+  const pdfSrc = offlineBlobUrl || (!isOffline ? onlinePdfViewUrl : undefined);
 
   const handleShare = async () => {
     await shareOrCopyMaterialLink(material);
@@ -154,26 +197,39 @@ export default function ResourceViewerModal({
     window.setTimeout(() => setCopiedLink(false), 2400);
   };
 
+  const handleToggleCompleted = async () => {
+    const nextPct = readingPct >= 100 ? 25 : 100;
+    setReadingPct(nextPct);
+    await saveReadingProgress(canonicalId, nextPct, 1);
+  };
+
   const handleSubmitReport = async (e: React.FormEvent) => {
     e.preventDefault();
+    setReportError(null);
     try {
       setSubmittingReport(true);
-      const res = await fetch(`/api/resources/${encodeURIComponent(canonicalId)}/report`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          resourceTitle: material.title,
-          courseCode: material.courseCode,
-          reason: reportReason,
-          details: reportDetails.trim(),
-        }),
-      });
-      if (res.ok) {
-        setReportSubmitted(true);
-        window.setTimeout(() => {
-          setShowReportBar(false);
-        }, 1800);
+      const res = await fetch(
+        `/api/resources/${encodeURIComponent(canonicalId)}/report`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            resourceTitle: material.title,
+            courseCode: material.courseCode,
+            reason: reportReason,
+            details: reportDetails.trim(),
+          }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setReportError(extractApiError(data, "Could not submit report."));
+        return;
       }
+      setReportSubmitted(true);
+      window.setTimeout(() => {
+        setShowReportBar(false);
+      }, 1800);
     } finally {
       setSubmittingReport(false);
     }
@@ -189,7 +245,10 @@ export default function ResourceViewerModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-white w-full max-w-6xl max-h-[94vh] rounded-2xl sm:rounded-3xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden">
+      <div
+        ref={dialogRef}
+        className="bg-white w-full max-w-6xl max-h-[94vh] rounded-2xl sm:rounded-3xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden"
+      >
         {/* Modal Header */}
         <div className="px-4 sm:px-6 py-4 border-b border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
           <div className="min-w-0">
@@ -233,6 +292,22 @@ export default function ResourceViewerModal({
 
           {/* Action Toolbar */}
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            {!isVideo && (
+              <button
+                type="button"
+                onClick={handleToggleCompleted}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                  readingPct >= 100
+                    ? "bg-emerald-50 border-emerald-200 text-[#00875A]"
+                    : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+                title="Track whether you have finished studying this document"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{readingPct >= 100 ? "Completed" : "Mark Completed"}</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => onToggleBookmark(material)}
@@ -282,7 +357,9 @@ export default function ResourceViewerModal({
                 type="button"
                 disabled={isDownloading}
                 onClick={async () => {
-                  const res = await downloadMaterial(material, { saveToDevice: true });
+                  const res = await downloadMaterial(material, {
+                    saveToDevice: true,
+                  });
                   if (res.ok && !offlineBlobUrl) {
                     const rec = await getOfflineDocument(canonicalId);
                     if (rec?.blob) {
@@ -319,7 +396,7 @@ export default function ResourceViewerModal({
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all"
-                title="Open PDF in new browser tab"
+                title="Open PDF in native browser reader"
               >
                 <Maximize2 className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Full Tab</span>
@@ -331,6 +408,7 @@ export default function ResourceViewerModal({
                 type="button"
                 onClick={() => setShowReportBar((prev) => !prev)}
                 title="Report broken file or wrong course metadata"
+                aria-label="Report issue with this material"
                 className={`p-2 rounded-xl border transition-colors cursor-pointer ${
                   showReportBar
                     ? "border-amber-300 bg-amber-50 text-amber-800"
@@ -365,10 +443,14 @@ export default function ResourceViewerModal({
                 onSubmit={handleSubmitReport}
                 className="flex flex-col sm:flex-row sm:items-center gap-2.5"
               >
-                <span className="text-xs font-bold text-amber-900 shrink-0">
+                <label
+                  htmlFor="viewer-report-reason"
+                  className="text-xs font-bold text-amber-900 shrink-0"
+                >
                   Report Issue:
-                </span>
+                </label>
                 <select
+                  id="viewer-report-reason"
                   value={reportReason}
                   onChange={(e) => setReportReason(e.target.value)}
                   className="px-2.5 py-1.5 rounded-lg border border-amber-300 bg-white text-xs font-semibold text-slate-800"
@@ -381,11 +463,17 @@ export default function ResourceViewerModal({
                 </select>
                 <input
                   type="text"
+                  aria-label="Additional report details"
                   value={reportDetails}
                   onChange={(e) => setReportDetails(e.target.value)}
                   placeholder="Optional note (e.g. should be MEE 302)"
                   className="flex-1 px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-xs text-slate-800"
                 />
+                {reportError && (
+                  <span className="text-xs font-semibold text-rose-700">
+                    {reportError}
+                  </span>
+                )}
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="submit"
@@ -404,6 +492,24 @@ export default function ResourceViewerModal({
                 </div>
               </form>
             )}
+          </div>
+        )}
+
+        {/* Mobile Native PDF Reader Helper Banner (addresses mobile WebView iframe limitations) */}
+        {!isVideo && pdfSrc && (
+          <div className="sm:hidden px-4 py-2.5 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between gap-2 shrink-0">
+            <span className="text-[11px] font-medium text-emerald-900">
+              On mobile? Open in your native PDF reader for smooth multi-page zoom &amp; scroll.
+            </span>
+            <a
+              href={pdfSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#00875A] text-white text-[11px] font-bold"
+            >
+              <span>Open PDF</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
           </div>
         )}
 

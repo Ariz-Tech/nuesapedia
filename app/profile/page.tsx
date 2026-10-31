@@ -13,6 +13,7 @@ import { useSavedResources } from "@/context/SavedResourcesContext";
 import { DEPARTMENTS } from "@/lib/departments";
 import { getRandomAvatar } from "@/lib/avatars";
 import { formatBytes } from "@/lib/offline-vault";
+import { extractApiError, validatePassword } from "@/lib/api-helpers";
 import {
   Bookmark,
   Building2,
@@ -99,46 +100,52 @@ export default function ProfilePage() {
   const [passwordMsg, setPasswordMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
-    fetchProfile();
-    fetchSubmissions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    let active = true;
 
-  const fetchProfile = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch("/api/auth/me");
-      const data = await res.json();
+    async function loadProfileData() {
+      try {
+        const [meRes, subRes] = await Promise.all([
+          fetch("/api/auth/me", { cache: "no-store" }),
+          fetch("/api/uploads", { cache: "no-store" }),
+        ]);
 
-      if (!res.ok || !data.success) {
-        router.push("/login");
-        return;
+        const meData = await meRes.json().catch(() => null);
+        if (!active) return;
+
+        if (!meRes.ok || !meData?.success) {
+          router.push("/login?redirect=/profile");
+          return;
+        }
+
+        const u: UserProfile = meData.user;
+        setUser(u);
+        setEditName(u.name || "");
+        setEditDept(DEPARTMENTS.includes(u.department) ? u.department : DEPARTMENTS[0]);
+        setEditLevel(LEVELS.includes(u.level) ? u.level : "100L");
+
+        if (subRes.ok) {
+          const subData = await subRes.json().catch(() => null);
+          if (active && subData?.success) {
+            setSubmissions(subData.submissions || []);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load profile:", err);
+        if (active) {
+          router.push("/login?redirect=/profile");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
       }
-
-      const u: UserProfile = data.user;
-      setUser(u);
-      setEditName(u.name || "");
-      setEditDept(DEPARTMENTS.includes(u.department) ? u.department : DEPARTMENTS[0]);
-      setEditLevel(LEVELS.includes(u.level) ? u.level : "100L");
-    } catch (err) {
-      console.error("Failed to load profile:", err);
-      router.push("/login");
-    } finally {
-      setLoading(false);
     }
-  };
 
-  const fetchSubmissions = async () => {
-    try {
-      const res = await fetch("/api/uploads");
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setSubmissions(data.submissions || []);
-      }
-    } catch (err) {
-      console.error("Failed to load submissions:", err);
-    }
-  };
+    void loadProfileData();
+    return () => {
+      active = false;
+    };
+  }, [router]);
 
   const handleRollAvatar = async () => {
     if (!user) return;
@@ -185,7 +192,7 @@ export default function ProfilePage() {
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || "Failed to update profile.");
+        throw new Error(extractApiError(data, "Failed to update profile."));
       }
 
       setUser(data.user);
@@ -204,10 +211,19 @@ export default function ProfilePage() {
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordMsg(null);
-    if (!currentPassword || newPassword.length < 6) {
+    if (!currentPassword) {
       setPasswordMsg({
         type: "err",
-        text: "Enter your current password and a new password of at least 6 characters.",
+        text: "Please enter your current password.",
+      });
+      return;
+    }
+
+    const pwCheck = validatePassword(newPassword);
+    if (!pwCheck.valid) {
+      setPasswordMsg({
+        type: "err",
+        text: pwCheck.message!,
       });
       return;
     }
@@ -215,13 +231,13 @@ export default function ProfilePage() {
     try {
       setSavingPassword(true);
       const res = await fetch("/api/auth/password", {
-        method: "POST",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || "Could not update password.");
+        throw new Error(extractApiError(data, "Could not update password."));
       }
 
       setCurrentPassword("");
@@ -584,8 +600,7 @@ export default function ProfilePage() {
 
                               {!isYouTube && sub.fileUrl && sub.fileUrl !== "#" && (
                                 <a
-                                  href={sub.fileUrl}
-                                  download={sub.fileName}
+                                  href={`/api/resources/${encodeURIComponent(sub.id)}/download`}
                                   className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-emerald-700 hover:border-emerald-300 transition-colors"
                                   title="Download File"
                                 >
@@ -593,42 +608,43 @@ export default function ProfilePage() {
                                 </a>
                               )}
 
-                              {confirmingSubId === sub.id ? (
-                                <div className="flex items-center gap-1.5 p-1 rounded-xl bg-rose-50 border border-rose-200">
-                                  <span className="text-[11px] font-semibold text-rose-700 px-1">Withdraw?</span>
+                              {!isApproved &&
+                                (confirmingSubId === sub.id ? (
+                                  <div className="flex items-center gap-1.5 p-1 rounded-xl bg-rose-50 border border-rose-200">
+                                    <span className="text-[11px] font-semibold text-rose-700 px-1">Withdraw?</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteSubmission(sub.id)}
+                                      disabled={deletingSubId === sub.id}
+                                      className="px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
+                                    >
+                                      {deletingSubId === sub.id ? (
+                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                      ) : (
+                                        <>
+                                          <Check className="w-3 h-3" />
+                                          <span>Yes</span>
+                                        </>
+                                      )}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmingSubId(null)}
+                                      className="p-1 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-white transition-colors cursor-pointer"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ) : (
                                   <button
                                     type="button"
-                                    onClick={() => handleDeleteSubmission(sub.id)}
-                                    disabled={deletingSubId === sub.id}
-                                    className="px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1"
+                                    onClick={() => setConfirmingSubId(sub.id)}
+                                    className="p-2 rounded-xl border border-rose-100 text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
+                                    title="Withdraw pending or rejected submission"
                                   >
-                                    {deletingSubId === sub.id ? (
-                                      <Loader2 className="w-3 h-3 animate-spin" />
-                                    ) : (
-                                      <>
-                                        <Check className="w-3 h-3" />
-                                        <span>Yes</span>
-                                      </>
-                                    )}
+                                    <Trash2 className="w-4 h-4" />
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmingSubId(null)}
-                                    className="p-1 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-white transition-colors cursor-pointer"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmingSubId(sub.id)}
-                                  className="p-2 rounded-xl border border-rose-100 text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition-colors cursor-pointer"
-                                  title="Withdraw submission"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
+                                ))}
                             </div>
                           </div>
 
@@ -794,12 +810,12 @@ export default function ProfilePage() {
 
                       <div>
                         <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                          New Password (min. 6 characters)
+                          New Password (min. 8 chars, letter + number)
                         </label>
                         <input
                           type="password"
                           required
-                          minLength={6}
+                          minLength={8}
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
                           placeholder="Enter new password"

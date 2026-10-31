@@ -1,80 +1,50 @@
-import { NextResponse } from "next/server";
-import { DEPARTMENT_DETAILS, getDepartmentBySlug } from "@/lib/departments";
-import { COURSE_REGISTRY } from "@/lib/courses";
-import { getApprovedResourcesPaginated } from "@/lib/db";
+import { resolveDepartment } from "@/lib/departments";
+import { getApprovedCourses, getApprovedResourcesPaginated } from "@/lib/db";
+import { apiError, apiSuccess } from "@/lib/api-helpers";
 
-export const dynamic = "force-dynamic";
-
-interface RouteParams {
-  params: Promise<{ departmentId: string }>;
-}
-
-/**
- * GET /api/departments/:departmentId
- * Returns department metadata, courses, and approved resources (docs/API_SPEC.md §9.2)
- */
-export async function GET(_request: Request, { params }: RouteParams) {
+export async function GET(
+  _req: Request,
+  context: { params: Promise<{ departmentId: string }> }
+) {
   try {
-    const { departmentId } = await params;
-    const normalizedNeedle = decodeURIComponent(departmentId).trim().toLowerCase();
-
-    const dept =
-      getDepartmentBySlug(normalizedNeedle) ||
-      DEPARTMENT_DETAILS.find(
-        (d) =>
-          d.code.toLowerCase() === normalizedNeedle ||
-          d.name.toLowerCase() === normalizedNeedle
-      );
+    const { departmentId } = await context.params;
+    const dept = resolveDepartment(decodeURIComponent(departmentId));
 
     if (!dept) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: "DEPARTMENT_NOT_FOUND",
-            message: `Department '${departmentId}' was not found.`,
-          },
-        },
-        { status: 404 }
-      );
+      return apiError("NOT_FOUND", "Engineering department not found.", 404);
     }
 
-    const courses = Object.values(COURSE_REGISTRY).filter(
+    const [allCourses, resourcesResult] = await Promise.all([
+      getApprovedCourses(),
+      getApprovedResourcesPaginated({
+        department: dept.name,
+        limit: 50,
+      }),
+    ]);
+
+    const courses = allCourses.filter(
       (c) => c.department.toLowerCase() === dept.name.toLowerCase()
     );
 
-    const { resources } = await getApprovedResourcesPaginated({
-      department: dept.name,
-      limit: 500,
-    });
+    const levels = ["100L", "200L", "300L", "400L", "500L"].map((lvl) => ({
+      level: lvl,
+      courses: courses.filter((c) => c.level === lvl),
+      resourceCount: resourcesResult.resources.filter((r) => r.level === lvl)
+        .length,
+    }));
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        id: dept.slug,
-        code: dept.code,
-        name: dept.name,
-        shortName: dept.shortName,
-        slug: dept.slug,
-        description: dept.description,
-        courses,
-        resources,
+    return apiSuccess({
+      department: {
+        ...dept,
         courseCount: courses.length,
-        resourceCount: resources.length,
+        resourceCount: resourcesResult.total,
+        levels,
+        courses,
+        recentResources: resourcesResult.resources.slice(0, 12),
       },
     });
   } catch (error) {
     console.error("GET /api/departments/[departmentId] error:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "Failed to fetch department details.",
-        },
-      },
-      { status: 500 }
-    );
+    return apiError("INTERNAL_ERROR", "Failed to load department details.", 500);
   }
 }
-

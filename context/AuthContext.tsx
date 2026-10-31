@@ -1,6 +1,15 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+} from "react";
+import { clearUserSavedCache } from "@/lib/saved-client";
+import { clearLocalReadingProgress } from "@/lib/offline-vault";
 
 export interface AuthUser {
   id: string;
@@ -10,91 +19,88 @@ export interface AuthUser {
   department: string;
   level: string;
   role?: string;
+  createdAt?: string;
 }
 
 interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<AuthUser | null>;
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  refresh: async () => {},
+  refresh: async () => null,
   logout: async () => {},
 });
 
-let cachedUser: AuthUser | null = null;
-let lastFetchTime = 0;
-const CACHE_TTL_MS = 30000; // 30 seconds cache to eliminate repeated fetches on every navigation
-let inFlightPromise: Promise<AuthUser | null> | null = null;
-
-async function fetchAuthUser(force = false): Promise<AuthUser | null> {
-  const now = Date.now();
-  if (!force && cachedUser && now - lastFetchTime < CACHE_TTL_MS) {
-    return cachedUser;
-  }
-  if (!force && inFlightPromise) {
-    return inFlightPromise;
-  }
-
-  inFlightPromise = (async () => {
-    try {
-      const res = await fetch("/api/auth/me");
-      if (!res.ok) {
-        cachedUser = null;
-        lastFetchTime = now;
-        return null;
-      }
-      const data = await res.json();
-      if (data?.success && data?.user) {
-        cachedUser = data.user;
-        lastFetchTime = now;
-        return data.user;
-      }
-      cachedUser = null;
-      lastFetchTime = now;
-      return null;
-    } catch {
-      cachedUser = null;
-      return null;
-    } finally {
-      inFlightPromise = null;
-    }
-  })();
-
-  return inFlightPromise;
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(cachedUser);
-  const [loading, setLoading] = useState(cachedUser === null);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const inFlightRef = useRef<Promise<AuthUser | null> | null>(null);
 
-  const refresh = useCallback(async () => {
-    const fetched = await fetchAuthUser(true);
-    setUser(fetched);
-    setLoading(false);
+  const fetchMe = useCallback(async (): Promise<AuthUser | null> => {
+    if (inFlightRef.current) {
+      return inFlightRef.current;
+    }
+
+    const promise = (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data?.success && data?.user ? (data.user as AuthUser) : null;
+      } catch {
+        return null;
+      } finally {
+        inFlightRef.current = null;
+      }
+    })();
+
+    inFlightRef.current = promise;
+    return promise;
   }, []);
 
+  const refresh = useCallback(async () => {
+    const fetched = await fetchMe();
+    setUser(fetched);
+    setLoading(false);
+    return fetched;
+  }, [fetchMe]);
+
   const logout = useCallback(async () => {
+    const activeUserId = user?.id;
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } catch {
-      // ignore
+      // Ignore network error during logout
     }
-    cachedUser = null;
-    lastFetchTime = 0;
+
+    // Purge user-scoped local caches so shared computers never leak data to the next user
+    clearUserSavedCache(activeUserId);
+    await clearLocalReadingProgress();
+    if (typeof navigator !== "undefined" && navigator.serviceWorker?.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: "CLEAR_USER_CACHE" });
+    }
+
     setUser(null);
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
-    fetchAuthUser(false).then((u) => {
-      setUser(u);
-      setLoading(false);
-    });
-  }, []);
+    let active = true;
+    (async () => {
+      const fetched = await fetchMe();
+      if (active) {
+        setUser(fetched);
+        setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [fetchMe]);
 
   return (
     <AuthContext.Provider value={{ user, loading, refresh, logout }}>

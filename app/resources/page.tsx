@@ -86,17 +86,39 @@ function ResourcesCatalogContent() {
   const [catalogResources, setCatalogResources] = useState<CourseMaterialItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Filters & Sorting
-  const [selectedDept, setSelectedDept] = useState("All Departments");
+  // Filters & Sorting (initialized directly from URL query params without cascading effect setState)
+  const [selectedDept, setSelectedDept] = useState(() => {
+    const dept = searchParams.get("dept") || searchParams.get("department");
+    if (!dept) return "All Departments";
+    const bySlug = getDepartmentBySlug(dept);
+    const byName = DEPARTMENTS.find((d) => d.toLowerCase() === dept.toLowerCase());
+    return bySlug?.name || byName || dept;
+  });
   const [selectedLevel, setSelectedLevel] = useState("All Levels");
-  const [selectedSemester, setSelectedSemester] = useState("All Semesters");
-  const [selectedCourse, setSelectedCourse] = useState("All Courses");
+  const [selectedSemester, setSelectedSemester] = useState(() => {
+    const sem = searchParams.get("semester");
+    return sem && SEMESTERS.includes(sem) ? sem : "All Semesters";
+  });
+  const [selectedCourse, setSelectedCourse] = useState(() => {
+    const course = searchParams.get("course");
+    return course ? course.toUpperCase() : "All Courses";
+  });
   const [selectedMedium, setSelectedMedium] = useState<
     "ALL" | "PDF" | "YOUTUBE" | "OFFLINE"
-  >("ALL");
-  const [selectedCategory, setSelectedCategory] = useState("All Categories");
+  >(() => {
+    const medium = searchParams.get("medium");
+    return medium === "PDF" || medium === "YOUTUBE" || medium === "OFFLINE"
+      ? medium
+      : "ALL";
+  });
+  const [selectedCategory, setSelectedCategory] = useState(() => {
+    const category = searchParams.get("category");
+    return category ? normalizeCategoryParam(category) : "All Categories";
+  });
   const [sortBy, setSortBy] = useState<SortOption>("newest");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(
+    () => searchParams.get("search") ?? searchParams.get("q") ?? ""
+  );
   const deferredQuery = useDeferredValue(searchQuery);
   const [visibleLimit, setVisibleLimit] = useState(24);
 
@@ -116,28 +138,14 @@ function ResourcesCatalogContent() {
   const [reqDetails, setReqDetails] = useState("");
   const [submittingRequest, setSubmittingRequest] = useState(false);
 
-  // Sync URL query params to filter state
   useEffect(() => {
-    const dept = searchParams.get("dept") || searchParams.get("department");
-    const medium = searchParams.get("medium");
-    const category = searchParams.get("category");
-    const course = searchParams.get("course");
-    const semester = searchParams.get("semester");
-    const q = searchParams.get("search") ?? searchParams.get("q");
-
-    if (dept) {
-      const bySlug = getDepartmentBySlug(dept);
-      const byName = DEPARTMENTS.find((d) => d.toLowerCase() === dept.toLowerCase());
-      setSelectedDept(bySlug?.name || byName || dept);
-    }
-    if (medium === "PDF" || medium === "YOUTUBE" || medium === "OFFLINE") {
-      setSelectedMedium(medium);
-    }
-    if (category) setSelectedCategory(normalizeCategoryParam(category));
-    if (course) setSelectedCourse(course.toUpperCase());
-    if (semester && SEMESTERS.includes(semester)) setSelectedSemester(semester);
-    if (q !== null) setSearchQuery(q);
-  }, [searchParams]);
+    if (!showRequestModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowRequestModal(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showRequestModal]);
 
   // Fetch approved course materials from API with IndexedDB offline fallback
   useEffect(() => {
@@ -150,12 +158,12 @@ function ResourcesCatalogContent() {
 
         if (typeof navigator === "undefined" || navigator.onLine) {
           try {
-            const res = await fetch("/api/resources?limit=500");
+            const res = await fetch("/api/resources?limit=100");
             const data = res.ok ? await res.json() : null;
-            const list = Array.isArray(data?.data)
-              ? data.data
-              : Array.isArray(data?.resources)
-                ? data.resources
+            const list = Array.isArray(data?.resources)
+              ? data.resources
+              : Array.isArray(data?.data)
+                ? data.data
                 : [];
             if (data?.success) {
               normalized = list.map((r: CourseMaterialItem) => normalizeMaterial(r));
@@ -1033,6 +1041,9 @@ function ResourcesCatalogContent() {
       {/* Request Missing Material Modal */}
       {showRequestModal && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="request-modal-title"
           className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowRequestModal(false);
@@ -1044,12 +1055,16 @@ function ResourcesCatalogContent() {
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#00875A]">
                   Student Request Board
                 </span>
-                <h3 className="text-lg font-extrabold text-[#0C3B2E] mt-0.5">
+                <h3
+                  id="request-modal-title"
+                  className="text-lg font-extrabold text-[#0C3B2E] mt-0.5"
+                >
                   Request Missing Course Material
                 </h3>
               </div>
               <button
                 type="button"
+                aria-label="Close request modal"
                 onClick={() => setShowRequestModal(false)}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
               >
@@ -1179,6 +1194,11 @@ function ResourcesCatalogContent() {
   );
 }
 
+function ResourcesCatalogKeyedWrapper() {
+  const searchParams = useSearchParams();
+  return <ResourcesCatalogContent key={searchParams.toString()} />;
+}
+
 export default function ResourcesCatalogPage() {
   return (
     <Suspense
@@ -1193,7 +1213,7 @@ export default function ResourcesCatalogPage() {
         </div>
       }
     >
-      <ResourcesCatalogContent />
+      <ResourcesCatalogKeyedWrapper />
     </Suspense>
   );
 }

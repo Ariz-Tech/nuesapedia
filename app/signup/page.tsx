@@ -1,24 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BookOpen, Dices, Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { getRandomAvatar } from "@/lib/avatars";
-
+import { getAvatarPresets, getRandomAvatar } from "@/lib/avatars";
 import { DEPARTMENTS } from "@/lib/departments";
+import {
+  extractApiError,
+  getSafeRedirectPath,
+  validatePassword,
+} from "@/lib/api-helpers";
 
 const LEVELS = ["100L", "200L", "300L", "400L", "500L"];
+const DEFAULT_AVATAR = getAvatarPresets()[0];
 
-export default function SignupPage() {
+function SignupForm() {
   const router = useRouter();
-  const { refresh: refreshAuth } = useAuth();
+  const searchParams = useSearchParams();
+  const { user, loading: authLoading, refresh: refreshAuth } = useAuth();
 
-  const [checkingAuth, setCheckingAuth] = useState(true);
-  // Initial random avatar
-  const [avatar, setAvatar] = useState(() => getRandomAvatar("EngineeringStudent"));
+  const redirectTarget = getSafeRedirectPath(
+    searchParams.get("callbackUrl") || searchParams.get("redirect"),
+    "/profile"
+  );
+
+  // Deterministic initial avatar prevents SSR hydration mismatches
+  const [avatar, setAvatar] = useState<string>(DEFAULT_AVATAR);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [department, setDepartment] = useState<string>(DEPARTMENTS[0]);
@@ -31,18 +41,10 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // If user is already signed in, redirect them directly to profile
-    fetch("/api/auth/me")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.success && data?.user) {
-          router.replace("/profile");
-        } else {
-          setCheckingAuth(false);
-        }
-      })
-      .catch(() => setCheckingAuth(false));
-  }, [router]);
+    if (!authLoading && user) {
+      router.replace(redirectTarget);
+    }
+  }, [authLoading, user, redirectTarget, router]);
 
   const handleRollAvatar = () => {
     setAvatar(getRandomAvatar());
@@ -62,8 +64,9 @@ export default function SignupPage() {
       return;
     }
 
-    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-      setError("Password must be at least 8 characters and contain both letters and numbers.");
+    const pwCheck = validatePassword(password);
+    if (!pwCheck.valid) {
+      setError(pwCheck.message!);
       return;
     }
 
@@ -85,22 +88,22 @@ export default function SignupPage() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        throw new Error(data.error || "Signup failed. Please try again.");
+        throw new Error(extractApiError(data, "Signup failed. Please try again."));
       }
 
-      // Redirect to profile upon successful account creation
       await refreshAuth();
-      router.push("/profile");
+      router.push(redirectTarget);
       router.refresh();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "An error occurred during signup.";
+      const message =
+        err instanceof Error ? err.message : "An error occurred during signup.";
       setError(message);
     } finally {
       setLoading(false);
     }
   };
 
-  if (checkingAuth) {
+  if (authLoading) {
     return (
       <div className="min-h-screen bg-[#FAFAFA] flex flex-col items-center justify-center p-4">
         <Loader2 className="w-8 h-8 text-[#00875A] animate-spin mb-3" />
@@ -110,10 +113,9 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA] flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-[#FAFAFA] flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        {/* Brand Header */}
-        <Link href="/" className="inline-flex items-center gap-2 group mb-4">
+        <Link href="/" className="inline-flex items-center gap-2 group mb-3">
           <div className="w-10 h-10 rounded-xl bg-[#0C3B2E] flex items-center justify-center text-white shadow-sm group-hover:bg-[#00875A] transition-colors">
             <BookOpen className="w-5 h-5" />
           </div>
@@ -121,95 +123,111 @@ export default function SignupPage() {
             The NUESA Library
           </span>
         </Link>
-        <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
           Create Student Account
-        </h2>
-        <p className="mt-2 text-xs sm:text-sm text-slate-500">
-          Faculty of Engineering Study Vault & Academic Library
+        </h1>
+        <p className="mt-1.5 text-xs sm:text-sm text-slate-500">
+          Save engineering materials, sync reading progress, and contribute notes
         </p>
       </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-lg">
-        <div className="bg-white py-8 px-6 sm:px-10 shadow-[0_4px_24px_rgba(0,0,0,0.04)] border border-slate-200/80 rounded-3xl">
+      <div className="mt-6 sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="bg-white py-7 px-6 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.06)] rounded-2xl border border-slate-100 sm:px-8">
           {error && (
-            <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-xs sm:text-sm text-rose-700">
+            <div
+              role="alert"
+              className="mb-5 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-medium"
+            >
               {error}
             </div>
           )}
 
-          {/* Random Assigned Avatar Showcase */}
-          <div className="mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-200/70 flex items-center justify-between gap-4">
+          {/* Avatar Picker */}
+          <div className="flex items-center justify-between p-3.5 mb-5 rounded-xl bg-slate-50 border border-slate-100">
             <div className="flex items-center gap-3">
-              <div className="relative w-14 h-14 rounded-full overflow-hidden border-2 border-emerald-500 bg-white shadow-sm shrink-0">
+              <div className="w-12 h-12 rounded-full overflow-hidden bg-white border border-slate-200 shrink-0">
                 <Image
                   src={avatar}
-                  alt="Student Avatar"
-                  width={56}
-                  height={56}
+                  alt="Selected student avatar"
+                  width={48}
+                  height={48}
                   unoptimized
                   className="w-full h-full object-cover"
                 />
               </div>
               <div>
-                <div className="text-xs font-semibold text-slate-900">
-                  Assigned Profile Avatar
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  Unique AI avatar generated for you
-                </div>
+                <p className="text-xs font-semibold text-slate-800">
+                  Student Avatar
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Roll to customize your profile badge
+                </p>
               </div>
             </div>
             <button
               type="button"
               onClick={handleRollAvatar}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-white border border-slate-300 text-slate-700 hover:text-emerald-700 hover:border-emerald-300 transition-colors shadow-xs cursor-pointer active:scale-95"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:border-[#00875A] text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
             >
-              <Dices className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Roll New</span>
+              <Dices className="w-3.5 h-3.5 text-[#00875A]" />
+              Roll
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Full Name */}
+          <form className="space-y-4" onSubmit={handleSubmit}>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+              <label
+                htmlFor="signup-name"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
                 Full Name
               </label>
               <input
+                id="signup-name"
+                name="name"
                 type="text"
+                autoComplete="name"
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Adesola Johnson"
-                className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition-all text-slate-900"
+                placeholder="e.g. Amina Okafor"
+                className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A] text-slate-900"
               />
             </div>
 
-            {/* Student Email */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Student Email
+              <label
+                htmlFor="signup-email"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                Email Address
               </label>
               <input
+                id="signup-email"
+                name="email"
                 type="email"
+                autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="student@fuoye.edu.ng"
-                className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition-all text-slate-900"
+                placeholder="student@uniuyo.edu.ng"
+                className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A] text-slate-900"
               />
             </div>
 
-            {/* Department & Level */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                <label
+                  htmlFor="signup-department"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
                   Department
                 </label>
                 <select
+                  id="signup-department"
                   value={department}
                   onChange={(e) => setDepartment(e.target.value)}
-                  className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition-all text-slate-900"
+                  className="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A] text-slate-900"
                 >
                   {DEPARTMENTS.map((dept) => (
                     <option key={dept} value={dept}>
@@ -220,13 +238,17 @@ export default function SignupPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                <label
+                  htmlFor="signup-level"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
                   Level
                 </label>
                 <select
+                  id="signup-level"
                   value={level}
                   onChange={(e) => setLevel(e.target.value)}
-                  className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition-all text-slate-900"
+                  className="w-full px-3 py-2.5 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A] text-slate-900"
                 >
                   {LEVELS.map((lvl) => (
                     <option key={lvl} value={lvl}>
@@ -237,77 +259,111 @@ export default function SignupPage() {
               </div>
             </div>
 
-            {/* Password */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+              <label
+                htmlFor="signup-password"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
                 Password
               </label>
               <div className="relative">
                 <input
+                  id="signup-password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="At least 6 characters"
-                  className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition-all text-slate-900 pr-10"
+                  placeholder="At least 8 characters (letters + numbers)"
+                  className="w-full px-3.5 py-2.5 pr-10 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A] text-slate-900"
                 />
                 <button
                   type="button"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
                 </button>
               </div>
             </div>
 
-            {/* Confirm Password */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+              <label
+                htmlFor="signup-confirm-password"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
                 Confirm Password
               </label>
               <input
+                id="signup-confirm-password"
+                name="confirmPassword"
                 type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
                 required
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirm your password"
-                className="w-full px-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition-all text-slate-900"
+                placeholder="Re-enter your password"
+                className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A] text-slate-900"
               />
             </div>
 
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-3 px-4 rounded-xl text-sm font-semibold text-white bg-[#00875A] hover:bg-[#00734c] transition-all shadow-sm hover:shadow flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Creating Account...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Sign up with The NUESA Library</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#00875A] hover:bg-[#00734D] text-white text-sm font-semibold shadow-sm transition-colors disabled:opacity-60 cursor-pointer"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Creating Account...
+                </>
+              ) : (
+                <>
+                  Create Account
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
           </form>
 
-          <div className="mt-6 pt-6 border-t border-slate-100 text-center text-xs sm:text-sm text-slate-500">
-            Already registered?{" "}
-            <Link
-              href="/login"
-              className="font-semibold text-[#00875A] hover:underline"
-            >
-              Log in to your vault
-            </Link>
+          <div className="mt-6 pt-5 border-t border-slate-100 text-center">
+            <p className="text-xs text-slate-500">
+              Already have an account?{" "}
+              <Link
+                href={
+                  redirectTarget !== "/profile"
+                    ? `/login?redirect=${encodeURIComponent(redirectTarget)}`
+                    : "/login"
+                }
+                className="font-semibold text-[#00875A] hover:underline"
+              >
+                Sign in
+              </Link>
+            </p>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#FAFAFA] flex flex-col items-center justify-center p-4">
+          <Loader2 className="w-8 h-8 text-[#00875A] animate-spin mb-3" />
+          <p className="text-xs text-slate-400">Loading signup...</p>
+        </div>
+      }
+    >
+      <SignupForm />
+    </Suspense>
   );
 }
