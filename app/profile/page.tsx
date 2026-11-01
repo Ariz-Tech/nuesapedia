@@ -7,10 +7,11 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import type { DbSubmission } from "@/components/ResourceUploadPortal";
+import type { DbSubmission } from "@/lib/db/types";
+import YoutubeIcon from "@/components/icons/YoutubeIcon";
 import { useAuth } from "@/context/AuthContext";
 import { useSavedResources } from "@/context/SavedResourcesContext";
-import { DEPARTMENTS } from "@/lib/departments";
+import { DEPARTMENTS, isKnownDepartment } from "@/lib/departments";
 import { getRandomAvatar } from "@/lib/avatars";
 import { formatBytes } from "@/lib/offline-vault";
 import { extractApiError, validatePassword } from "@/lib/api-helpers";
@@ -51,13 +52,7 @@ const ResourceUploadPortal = dynamic(() => import("@/components/ResourceUploadPo
   ),
 });
 
-function YoutubeIcon({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-    </svg>
-  );
-}
+
 
 interface UserProfile {
   id: string;
@@ -120,7 +115,7 @@ export default function ProfilePage() {
         const u: UserProfile = meData.user;
         setUser(u);
         setEditName(u.name || "");
-        setEditDept(DEPARTMENTS.includes(u.department) ? u.department : DEPARTMENTS[0]);
+        setEditDept(isKnownDepartment(u.department) ? u.department : DEPARTMENTS[0]);
         setEditLevel(LEVELS.includes(u.level) ? u.level : "100L");
 
         if (subRes.ok) {

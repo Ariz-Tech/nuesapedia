@@ -149,9 +149,14 @@ export function parseSizeToBytes(sizeStr: string | null | undefined): number | n
 
 export function extractYouTubeId(url: string | null | undefined): string | null {
   if (!url || typeof url !== "string") return null;
-  const match = url.match(
-    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
+  const trimmed = url.trim();
+  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
+  const match = trimmed.match(
+    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
   );
   return match ? match[1] : null;
 }
+
+export const extractYoutubeId = (url?: string | null): string | undefined =>
+  extractYouTubeId(url) ?? undefined;
 

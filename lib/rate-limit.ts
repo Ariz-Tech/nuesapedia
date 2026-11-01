@@ -74,11 +74,6 @@ export async function checkRateLimit(
     const now = Date.now();
     const nextResetIso = new Date(now + config.windowMs).toISOString();
 
-    // Opportunistic cleanup of expired keys (~2% of calls)
-    if (Math.random() < 0.02) {
-      db.query(`DELETE FROM rate_limits WHERE reset_at < CURRENT_TIMESTAMP`).catch(() => {});
-    }
-
     const res = await db.query(
       `INSERT INTO rate_limits (key, count, reset_at)
        VALUES ($1, 1, $2::timestamptz)

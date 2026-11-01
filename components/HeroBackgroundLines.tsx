@@ -25,29 +25,51 @@ export default function HeroBackgroundLines() {
     const observer = new ResizeObserver(updateDimensions);
     observer.observe(el);
 
-    const handleWindowMouseMove = (e: MouseEvent) => {
-      const section = document.getElementById("hero-section") || el;
-      const rect = section.getBoundingClientRect();
+    let rafId: number | null = null;
+    let lastSnappedX = -1000;
+    let lastSnappedY = -1000;
+    let lastHovered = false;
 
-      if (
-        e.clientX >= rect.left &&
-        e.clientX <= rect.right &&
-        e.clientY >= rect.top &&
-        e.clientY <= rect.bottom
-      ) {
-        setMousePos({
-          x: e.clientX - rect.left,
-          y: e.clientY - rect.top,
-        });
-        setIsHovered(true);
-      } else {
-        setIsHovered(false);
-      }
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        const section = document.getElementById("hero-section") || el;
+        const rect = section.getBoundingClientRect();
+
+        const inside =
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom;
+
+        if (inside) {
+          const rawX = e.clientX - rect.left;
+          const rawY = e.clientY - rect.top;
+          const snapX = Math.round(rawX / gridSpacing) * gridSpacing;
+          const snapY = Math.round(rawY / gridSpacing) * gridSpacing;
+
+          if (snapX !== lastSnappedX || snapY !== lastSnappedY || !lastHovered) {
+            lastSnappedX = snapX;
+            lastSnappedY = snapY;
+            lastHovered = true;
+            setMousePos({ x: snapX, y: snapY });
+            setIsHovered(true);
+          }
+        } else if (lastHovered) {
+          lastHovered = false;
+          lastSnappedX = -1000;
+          lastSnappedY = -1000;
+          setIsHovered(false);
+          setMousePos({ x: -1000, y: -1000 });
+        }
+      });
     };
 
     window.addEventListener("mousemove", handleWindowMouseMove, { passive: true });
 
     return () => {
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
       observer.disconnect();
       window.removeEventListener("mousemove", handleWindowMouseMove);
     };

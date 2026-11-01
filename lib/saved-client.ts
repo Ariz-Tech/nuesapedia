@@ -30,16 +30,8 @@ function getStorageKey(userId?: string | null): string {
   return userId ? `nuesapedia_saved_user_${userId}` : GUEST_SAVED_KEY;
 }
 
-export function extractYoutubeId(input?: string | null): string | undefined {
-  if (!input) return undefined;
-  const trimmed = input.trim();
-  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
-
-  const match = trimmed.match(
-    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
-  );
-  return match?.[1];
-}
+import { extractYoutubeId } from "./api-helpers";
+export { extractYoutubeId };
 
 export function isVideoMaterial(item: Partial<CourseMaterialItem>): boolean {
   if (item.medium === "YOUTUBE") return true;

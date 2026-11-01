@@ -16,19 +16,11 @@ import {
   ExternalLink,
 } from "lucide-react";
 import type { DbSubmission } from "@/lib/db";
-import { extractApiError } from "@/lib/api-helpers";
+import { extractApiError, extractYouTubeId } from "@/lib/api-helpers";
+import YoutubeIcon from "@/components/icons/YoutubeIcon";
+import { DEPARTMENTS, isKnownDepartment } from "@/lib/departments";
 
 export type { DbSubmission };
-
-function YoutubeIcon({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-    </svg>
-  );
-}
-
-import { DEPARTMENTS } from "@/lib/departments";
 
 const LEVELS = ["100L", "200L", "300L", "400L", "500L"];
 
@@ -51,15 +43,8 @@ const VIDEO_CATEGORIES = [
 const SEMESTERS = ["First Semester", "Second Semester"];
 const SESSIONS = ["2025/2026", "2024/2025", "2023/2024", "2022/2023", "2021/2022", "Older"];
 
-/**
- * Extract YouTube 11-char video ID from any valid YouTube URL format
- */
-export function extractYouTubeId(url: string): string | null {
-  if (!url) return null;
-  const regExp = /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/;
-  const match = url.match(regExp);
-  return match ? match[1] : null;
-}
+// Re-export canonical YouTube ID extractor for backwards compatibility
+export { extractYouTubeId };
 
 interface ResourceUploadPortalProps {
   userDepartment?: string;
@@ -89,7 +74,7 @@ export default function ResourceUploadPortal({
   const [courseCode, setCourseCode] = useState("");
   const [title, setTitle] = useState("");
   const [department, setDepartment] = useState<string>(
-    userDepartment && DEPARTMENTS.includes(userDepartment)
+    userDepartment && isKnownDepartment(userDepartment)
       ? userDepartment
       : DEPARTMENTS[0]
   );

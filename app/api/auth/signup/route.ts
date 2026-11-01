@@ -8,7 +8,7 @@ import {
   sessionCookieOptions,
 } from "@/lib/auth";
 import { getRandomAvatar } from "@/lib/avatars";
-import { DEPARTMENTS } from "@/lib/departments";
+import { isKnownDepartment } from "@/lib/departments";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { apiError, apiSuccess, validatePassword } from "@/lib/api-helpers";
 
@@ -65,7 +65,7 @@ export async function POST(req: Request) {
       return apiError("VALIDATION_ERROR", pwCheck.message!, 400);
     }
 
-    if (!DEPARTMENTS.includes(department as (typeof DEPARTMENTS)[number])) {
+    if (!isKnownDepartment(department)) {
       return apiError(
         "VALIDATION_ERROR",
         "Please select a valid engineering department.",

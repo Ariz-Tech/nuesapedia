@@ -7,7 +7,7 @@ import Image from "next/image";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ResourceViewerModal from "@/components/ResourceViewerModal";
-import { DEPARTMENTS, getDepartmentBySlug } from "@/lib/departments";
+import { DEPARTMENTS, getDepartmentBySlug, isKnownDepartment } from "@/lib/departments";
 import { resolveCourseMetadata } from "@/lib/courses";
 import {
   type CourseMaterialItem,
@@ -124,19 +124,13 @@ function ResourcesCatalogContent() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
-  // Reset pagination on filter changes
-  useEffect(() => {
+  // Reset pagination on filter changes without cascading effect setState (React 19 pattern)
+  const filterKey = `${selectedDept}|${selectedLevel}|${selectedSemester}|${selectedCourse}|${selectedMedium}|${selectedCategory}|${deferredQuery}|${sortBy}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
     setCurrentPage(1);
-  }, [
-    selectedDept,
-    selectedLevel,
-    selectedSemester,
-    selectedCourse,
-    selectedMedium,
-    selectedCategory,
-    deferredQuery,
-    sortBy,
-  ]);
+  }
 
   // Active Bookmark / Download / Share / Course Pack Toast & Viewer Modal
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -554,7 +548,7 @@ function ResourcesCatalogContent() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (selectedDept !== "All Departments" && DEPARTMENTS.includes(selectedDept)) {
+                    if (selectedDept !== "All Departments" && isKnownDepartment(selectedDept)) {
                       setReqDepartment(selectedDept);
                     }
                     if (selectedCourse !== "All Courses") {

@@ -19,7 +19,11 @@ import {
   validatePassword,
   getSafeRedirectPath,
   formatBytes,
+  extractYouTubeId,
+  extractYoutubeId,
+  parseSizeToBytes,
 } from "@/lib/api-helpers";
+import { DEPARTMENTS, getDepartmentBySlug, resolveDepartment } from "@/lib/departments";
 import {
   createUser,
   updateUserPassword,
@@ -330,4 +334,55 @@ test("getClientIp prefers edge headers and uses first IP in x-forwarded-for chai
     headers: { "x-forwarded-for": "102.89.34.1, 10.0.0.1, 127.0.0.1" },
   });
   assert.equal(getClientIp(xffReq), "102.89.34.1");
+});
+
+test("extractYouTubeId and extractYoutubeId resolve standard and edge URLs consistently", () => {
+  const standard = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  const short = "https://youtu.be/dQw4w9WgXcQ";
+  const embed = "https://www.youtube.com/embed/dQw4w9WgXcQ";
+  const shorts = "https://www.youtube.com/shorts/dQw4w9WgXcQ";
+  const rawId = "dQw4w9WgXcQ";
+  const invalid = "https://example.com/not-youtube";
+
+  assert.equal(extractYouTubeId(standard), "dQw4w9WgXcQ");
+  assert.equal(extractYouTubeId(short), "dQw4w9WgXcQ");
+  assert.equal(extractYouTubeId(embed), "dQw4w9WgXcQ");
+  assert.equal(extractYouTubeId(shorts), "dQw4w9WgXcQ");
+  assert.equal(extractYouTubeId(rawId), "dQw4w9WgXcQ");
+  assert.equal(extractYouTubeId(invalid), null);
+  assert.equal(extractYouTubeId(null), null);
+  assert.equal(extractYouTubeId(""), null);
+
+  // Alias contract
+  assert.equal(extractYoutubeId(standard), "dQw4w9WgXcQ");
+  assert.equal(extractYoutubeId(invalid), undefined);
+});
+
+test("Department registry and resolution enforce strict naming and slug lookup", () => {
+  assert.equal(DEPARTMENTS.length, 5);
+  assert.ok(DEPARTMENTS.includes("Civil Engineering"));
+  assert.ok(DEPARTMENTS.includes("Mechanical Engineering"));
+
+  const civil = getDepartmentBySlug("civil");
+  assert.ok(civil);
+  assert.equal(civil.id, "CVE");
+  assert.equal(civil.name, "Civil Engineering");
+
+  const resolved = resolveDepartment("cve");
+  assert.ok(resolved);
+  assert.equal(resolved.slug, "civil");
+
+  assert.equal(getDepartmentBySlug("unknown_dept"), undefined);
+});
+
+test("File size parsing and byte calculations handle edge cases", () => {
+  assert.equal(parseSizeToBytes("2.5 MB"), 2621440);
+  assert.equal(parseSizeToBytes("500 KB"), 512000);
+  assert.equal(parseSizeToBytes("1024 B"), 1024);
+  assert.equal(parseSizeToBytes("invalid"), null);
+  assert.equal(parseSizeToBytes(null), null);
+  assert.equal(formatBytes(null), "PDF Document");
+  assert.equal(formatBytes(0), "PDF Document");
+  assert.equal(formatBytes(1024), "1.0 KB");
+  assert.equal(formatBytes(1024 * 1024), "1.00 MB");
 });

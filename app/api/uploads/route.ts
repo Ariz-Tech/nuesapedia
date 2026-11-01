@@ -4,7 +4,6 @@ import {
   getUserSubmissions,
   createSubmission,
   deleteSubmissionWithChecks,
-  pruneStaleUploads,
 } from "@/lib/db";
 import {
   generateSignedUploadUrl,
@@ -12,7 +11,7 @@ import {
   isR2Configured,
   MAX_PDF_UPLOAD_BYTES,
 } from "@/lib/r2";
-import { DEPARTMENTS } from "@/lib/departments";
+import { isKnownDepartment } from "@/lib/departments";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import {
   apiError,
@@ -82,17 +81,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Opportunistically prune abandoned upload sessions (>2 hours old) to prevent orphan storage leaks
-    if (Math.random() < 0.05) {
-      pruneStaleUploads(120)
-        .then(async (keys) => {
-          for (const key of keys) {
-            await deleteR2Object(key).catch(() => {});
-          }
-        })
-        .catch(() => {});
-    }
-
     const body = await req.json();
     const {
       title,
@@ -133,7 +121,7 @@ export async function POST(req: Request) {
       return apiError("VALIDATION_ERROR", "Invalid course code.", 400);
     }
 
-    if (!DEPARTMENTS.includes(department as (typeof DEPARTMENTS)[number])) {
+    if (!isKnownDepartment(department)) {
       return apiError("VALIDATION_ERROR", "Invalid engineering department.", 400);
     }
 

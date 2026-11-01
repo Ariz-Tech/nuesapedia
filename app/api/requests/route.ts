@@ -5,7 +5,7 @@ import {
   updateMaterialRequestStatus,
   findUserById,
 } from "@/lib/db";
-import { DEPARTMENTS } from "@/lib/departments";
+import { isKnownDepartment } from "@/lib/departments";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!DEPARTMENTS.includes(department as (typeof DEPARTMENTS)[number])) {
+    if (!isKnownDepartment(department)) {
       return apiError("VALIDATION_ERROR", "Invalid engineering department.", 400);
     }
 

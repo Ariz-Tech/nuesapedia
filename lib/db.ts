@@ -1,5 +1,6 @@
 import { getPool, getReadyDb, isDatabaseConfigured, isDevMemoryMode } from "./db/pool";
 
+export { getPool, getReadyDb, isDatabaseConfigured, isDevMemoryMode };
 export * from "./db/types";
 export * from "./db/users";
 export * from "./db/submissions";

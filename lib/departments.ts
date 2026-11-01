@@ -1,12 +1,16 @@
-export const DEPARTMENTS: string[] = [
+export const DEPARTMENTS = [
   "Civil Engineering",
   "Mechanical Engineering",
   "Materials and Metallurgical Engineering",
   "Agric and Bio Resources Engineering",
   "Mining Engineering",
-];
+] as const;
 
-export type DepartmentName = string;
+export type DepartmentName = (typeof DEPARTMENTS)[number];
+
+export function isKnownDepartment(name: string): name is DepartmentName {
+  return (DEPARTMENTS as readonly string[]).includes(name);
+}
 
 export interface DepartmentInfo {
   id: string;
