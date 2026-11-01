@@ -140,7 +140,7 @@ export function getClientIp(req: Request): string {
       .map((s) => s.trim())
       .filter(Boolean);
     if (parts.length > 0) {
-      return parts[parts.length - 1];
+      return parts[0];
     }
   }
 

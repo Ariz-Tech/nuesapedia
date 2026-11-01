@@ -4,6 +4,7 @@ import {
   getUserSubmissions,
   createSubmission,
   deleteSubmissionWithChecks,
+  pruneStaleUploads,
 } from "@/lib/db";
 import {
   generateSignedUploadUrl,
@@ -79,6 +80,17 @@ export async function POST(req: Request) {
         429,
         { "Retry-After": String(rate.retryAfterSeconds) }
       );
+    }
+
+    // Opportunistically prune abandoned upload sessions (>2 hours old) to prevent orphan storage leaks
+    if (Math.random() < 0.05) {
+      pruneStaleUploads(120)
+        .then(async (keys) => {
+          for (const key of keys) {
+            await deleteR2Object(key).catch(() => {});
+          }
+        })
+        .catch(() => {});
     }
 
     const body = await req.json();

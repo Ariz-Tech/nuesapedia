@@ -129,7 +129,20 @@ export async function POST(req: Request) {
 
     response.cookies.set(sessionCookieOptions(token));
     return response;
-  } catch (error) {
+  } catch (error: unknown) {
+    const errCode = (error as { code?: string })?.code;
+    const errMsg = (error as { message?: string })?.message || "";
+    if (
+      errCode === "23505" ||
+      errMsg.includes("unique constraint") ||
+      errMsg.includes("users_email_key")
+    ) {
+      return apiError(
+        "EMAIL_EXISTS",
+        "An account with this email already exists.",
+        409
+      );
+    }
     console.error("Signup error:", error);
     return apiError(
       "INTERNAL_ERROR",

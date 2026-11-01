@@ -120,7 +120,23 @@ function ResourcesCatalogContent() {
     () => searchParams.get("search") ?? searchParams.get("q") ?? ""
   );
   const deferredQuery = useDeferredValue(searchQuery);
-  const [visibleLimit, setVisibleLimit] = useState(24);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+
+  // Reset pagination on filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    selectedDept,
+    selectedLevel,
+    selectedSemester,
+    selectedCourse,
+    selectedMedium,
+    selectedCategory,
+    deferredQuery,
+    sortBy,
+  ]);
 
   // Active Bookmark / Download / Share / Course Pack Toast & Viewer Modal
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -147,18 +163,55 @@ function ResourcesCatalogContent() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [showRequestModal]);
 
-  // Fetch approved course materials from API with IndexedDB offline fallback
+  // Fetch approved course materials from API with bounded SQL pagination & IndexedDB offline fallback
   useEffect(() => {
     let mounted = true;
 
     async function loadData() {
+      setLoading(true);
       try {
         let normalized: CourseMaterialItem[] = [];
         let fetchedOnline = false;
 
+        // If user specifically requested OFFLINE items, read directly from IndexedDB
+        if (selectedMedium === "OFFLINE") {
+          const cached = await getCachedCatalogResources();
+          const map = new Map<string, CourseMaterialItem>();
+          for (const doc of offlineDocs) {
+            if (doc.material) {
+              map.set(doc.id, normalizeMaterial(doc.material));
+            }
+          }
+          for (const c of cached) {
+            if (isOfflineAvailable(c.resourceId || c.id) && !map.has(c.id)) {
+              map.set(c.id, normalizeMaterial(c));
+            }
+          }
+          const offlineList = Array.from(map.values());
+          if (mounted) {
+            setCatalogResources(offlineList);
+            setTotalCount(offlineList.length);
+            setTotalPages(Math.max(1, Math.ceil(offlineList.length / 24)));
+            setLoading(false);
+          }
+          return;
+        }
+
         if (typeof navigator === "undefined" || navigator.onLine) {
           try {
-            const res = await fetch("/api/resources?limit=100");
+            const params = new URLSearchParams();
+            params.set("page", String(currentPage));
+            params.set("limit", "24");
+            if (selectedDept !== "All Departments") params.set("department", selectedDept);
+            if (selectedLevel !== "All Levels") params.set("level", selectedLevel);
+            if (selectedSemester !== "All Semesters") params.set("semester", selectedSemester);
+            if (selectedCourse !== "All Courses") params.set("course", selectedCourse);
+            if (selectedCategory !== "All Categories") params.set("type", selectedCategory);
+            if (selectedMedium !== "ALL") params.set("medium", selectedMedium);
+            if (deferredQuery.trim()) params.set("query", deferredQuery.trim());
+            params.set("sort", sortBy);
+
+            const res = await fetch(`/api/resources?${params.toString()}`);
             const data = res.ok ? await res.json() : null;
             const list = Array.isArray(data?.resources)
               ? data.resources
@@ -168,6 +221,10 @@ function ResourcesCatalogContent() {
             if (data?.success) {
               normalized = list.map((r: CourseMaterialItem) => normalizeMaterial(r));
               fetchedOnline = true;
+              if (mounted) {
+                setTotalCount(Number(data.pagination?.total) || normalized.length);
+                setTotalPages(Number(data.pagination?.totalPages) || 1);
+              }
               if (normalized.length > 0) {
                 cacheCatalogResources(normalized).catch(() => {});
               }
@@ -181,6 +238,10 @@ function ResourcesCatalogContent() {
           const cached = await getCachedCatalogResources();
           if (cached.length > 0) {
             normalized = cached;
+            if (mounted) {
+              setTotalCount(cached.length);
+              setTotalPages(Math.max(1, Math.ceil(cached.length / 24)));
+            }
           }
         }
 
@@ -205,7 +266,20 @@ function ResourcesCatalogContent() {
     return () => {
       mounted = false;
     };
-  }, [refreshSaved]);
+  }, [
+    currentPage,
+    selectedDept,
+    selectedLevel,
+    selectedSemester,
+    selectedCourse,
+    selectedMedium,
+    selectedCategory,
+    deferredQuery,
+    sortBy,
+    offlineDocs,
+    isOfflineAvailable,
+    refreshSaved,
+  ]);
 
   // Merge live/cached catalog with all IndexedDB downloaded documents so downloaded PDFs are ALWAYS visible offline
   const allResources = useMemo(() => {
@@ -337,6 +411,7 @@ function ResourcesCatalogContent() {
     setSelectedMedium("ALL");
     setSelectedCategory("All Categories");
     setSearchQuery("");
+    setCurrentPage(1);
   };
 
   const hasActiveFilters =
@@ -349,6 +424,12 @@ function ResourcesCatalogContent() {
     Boolean(searchQuery.trim());
 
   const filteredResources = useMemo(() => {
+    // When online and not specifically filtering local Offline Vault, PostgreSQL already executed exact filtering & sorting
+    if (typeof navigator !== "undefined" && navigator.onLine && selectedMedium !== "OFFLINE") {
+      return catalogResources;
+    }
+
+    // Offline / local cache filtering
     const matches = allResources.filter((item) => {
       const canonicalId = item.resourceId || item.id;
       if (selectedDept !== "All Departments" && item.department !== selectedDept) return false;
@@ -401,6 +482,7 @@ function ResourcesCatalogContent() {
     return sorted;
   }, [
     allResources,
+    catalogResources,
     selectedDept,
     selectedLevel,
     selectedSemester,
@@ -728,8 +810,8 @@ function ResourcesCatalogContent() {
 
             {!loading && (
               <span>
-                Showing <strong className="text-slate-900">{filteredResources.length}</strong>{" "}
-                {filteredResources.length === 1 ? "material" : "materials"}
+                Showing <strong className="text-slate-900">{totalCount || filteredResources.length}</strong>{" "}
+                {(totalCount || filteredResources.length) === 1 ? "material" : "materials"}
               </span>
             )}
             {hasActiveFilters && (
@@ -806,7 +888,7 @@ function ResourcesCatalogContent() {
         ) : (
           <div className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {filteredResources.slice(0, visibleLimit).map((item) => {
+              {filteredResources.map((item) => {
                 const canonicalId = item.resourceId || item.id;
                 const isVideo = item.medium === "YOUTUBE";
                 const bookmarked = isSaved(canonicalId);
@@ -1022,16 +1104,39 @@ function ResourcesCatalogContent() {
               })}
             </div>
 
-            {/* Show More Pagination */}
-            {visibleLimit < filteredResources.length && (
-              <div className="text-center pt-4">
-                <button
-                  type="button"
-                  onClick={() => setVisibleLimit((prev) => prev + 24)}
-                  className="px-6 py-3 rounded-2xl bg-white border border-slate-200/90 hover:border-slate-300 text-xs sm:text-sm font-semibold text-slate-700 hover:text-slate-900 transition-all shadow-xs hover:shadow-sm cursor-pointer"
-                >
-                  Show More Materials ({filteredResources.length - visibleLimit} remaining)
-                </button>
+            {/* Server-backed Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-slate-200">
+                <div className="text-xs text-slate-500 font-medium">
+                  Showing page <strong className="text-slate-900">{currentPage}</strong> of{" "}
+                  <strong className="text-slate-900">{totalPages}</strong>{" "}
+                  ({totalCount || filteredResources.length}{" "}
+                  {(totalCount || filteredResources.length) === 1 ? "material" : "materials"})
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={currentPage <= 1 || loading}
+                    onClick={() => {
+                      setCurrentPage((p) => Math.max(1, p - 1));
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer shadow-2xs transition-all"
+                  >
+                    Previous Page
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentPage >= totalPages || loading}
+                    onClick={() => {
+                      setCurrentPage((p) => Math.min(totalPages, p + 1));
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    className="px-4 py-2 rounded-xl bg-[#00875A] hover:bg-[#00734c] text-white text-xs font-bold disabled:opacity-40 cursor-pointer shadow-2xs transition-all"
+                  >
+                    Next Page
+                  </button>
+                </div>
               </div>
             )}
           </div>

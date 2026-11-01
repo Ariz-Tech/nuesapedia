@@ -284,10 +284,20 @@ export async function deleteSubmissionWithChecks(
   if (isDevMemoryMode()) {
     const idx = devStore.submissions.findIndex((s) => s.id === submissionId);
     if (idx !== -1) devStore.submissions.splice(idx, 1);
+    // Cascade delete related records in dev memory mode
+    devStore.savedResources = devStore.savedResources.filter((s) => s.resourceId !== submissionId);
+    for (const [key, prog] of devStore.readingProgress.entries()) {
+      if (prog.resourceId === submissionId) devStore.readingProgress.delete(key);
+    }
+    devStore.resourceReports = devStore.resourceReports.filter((r) => r.resourceId !== submissionId);
     return { deleted: true, r2Key: existing.r2Key };
   }
 
   const db = await getReadyDb();
+  await db.query(`DELETE FROM saved_resources WHERE resource_id = $1`, [submissionId]);
+  await db.query(`DELETE FROM reading_progress WHERE resource_id = $1`, [submissionId]);
+  await db.query(`DELETE FROM resource_reports WHERE resource_id = $1`, [submissionId]);
+
   const res = await db.query(
     `DELETE FROM submissions WHERE id = $1 RETURNING id`,
     [submissionId]
@@ -297,6 +307,39 @@ export async function deleteSubmissionWithChecks(
     deleted: (res.rowCount ?? 0) > 0,
     r2Key: existing.r2Key,
   };
+}
+
+/**
+ * Prunes orphaned upload sessions stuck in 'UPLOADING' state past maxAgeMinutes.
+ * Returns the storage keys so the caller can garbage-collect associated R2 objects.
+ */
+export async function pruneStaleUploads(maxAgeMinutes: number = 120): Promise<string[]> {
+  const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
+
+  if (isDevMemoryMode()) {
+    const prunedKeys: string[] = [];
+    devStore.submissions = devStore.submissions.filter((s) => {
+      if (s.status === "UPLOADING" && s.createdAt < cutoff) {
+        if (s.r2Key) prunedKeys.push(s.r2Key);
+        return false;
+      }
+      return true;
+    });
+    return prunedKeys;
+  }
+
+  const db = await getReadyDb();
+  const res = await db.query(
+    `DELETE FROM submissions
+     WHERE status = 'UPLOADING'
+       AND created_at < $1::timestamptz
+     RETURNING r2_key`,
+    [cutoff]
+  );
+
+  return res.rows
+    .map((r) => r.r2_key)
+    .filter((k): k is string => typeof k === "string" && k.length > 0);
 }
 
 export async function deleteSubmission(

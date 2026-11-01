@@ -186,12 +186,17 @@ export function getPool(): Pool {
     const isLocal =
       connectionString.includes("localhost") || connectionString.includes("127.0.0.1");
 
+    const rejectUnauthorized =
+      process.env.PG_SSL_REJECT_UNAUTHORIZED !== undefined
+        ? process.env.PG_SSL_REJECT_UNAUTHORIZED === "true"
+        : process.env.NODE_ENV === "production";
+
     const nextPool = new Pool({
       connectionString,
       max: Number(process.env.PG_POOL_MAX) || 5,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
-      ssl: isLocal ? false : { rejectUnauthorized: false },
+      ssl: isLocal ? false : { rejectUnauthorized },
     });
 
     nextPool.on("error", (err) => {
@@ -213,7 +218,13 @@ export function getPool(): Pool {
 export async function getReadyDb(): Promise<Pool> {
   const db = getPool();
 
-  if (process.env.SKIP_SCHEMA_ENSURE === "true") {
+  // In production, migrations should be applied before deployment (via npm run db:migrate).
+  // Schema auto-ensure runs only in development/test unless explicitly opted-in via ENSURE_SCHEMA_ON_BOOT=true.
+  const shouldSkipEnsure =
+    process.env.SKIP_SCHEMA_ENSURE === "true" ||
+    (process.env.NODE_ENV === "production" && process.env.ENSURE_SCHEMA_ON_BOOT !== "true");
+
+  if (shouldSkipEnsure) {
     return db;
   }
 

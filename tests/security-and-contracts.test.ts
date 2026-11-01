@@ -33,8 +33,10 @@ import {
   deleteSubmissionWithChecks,
   mapSubmissionRow,
   updateSubmissionStatus,
+  pruneStaleUploads,
 } from "@/lib/db/submissions";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { addSavedResource, getSavedResources } from "@/lib/db/saved";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { normalizeDbError } from "@/lib/db/pool";
 
 test("Password hashing & constant-time verification", async () => {
@@ -263,4 +265,69 @@ test("normalizeDbError flattens AggregateError to prevent React Flight Aggregate
   assert.equal("errors" in normalized, false);
   assert.equal(normalized.code, "ECONNREFUSED");
   assert.match(normalized.message, /ECONNREFUSED 127\.0\.0\.1:5432/);
+});
+
+test("pruneStaleUploads purges abandoned sessions older than threshold", async () => {
+  const stale = await createSubmission({
+    id: "sub_stale_1",
+    userId: "usr_owner",
+    title: "Stale Upload",
+    courseCode: "MEE 201",
+    department: "Mechanical Engineering",
+    level: "200L",
+    semester: "First Semester",
+    type: "Lecture Note",
+    medium: "PDF",
+    r2Key: "uploads/mech/MEE201/stale.pdf",
+    status: "UPLOADING",
+  });
+  // Backdate createdAt to 3 hours ago
+  stale.createdAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+
+  const prunedKeys = await pruneStaleUploads(120);
+  assert.ok(prunedKeys.includes("uploads/mech/MEE201/stale.pdf"));
+});
+
+test("deleteSubmissionWithChecks cascades cleanup across saved bookmarks", async () => {
+  const sub = await createSubmission({
+    id: "sub_to_delete",
+    userId: "usr_owner",
+    title: "Obsolete PDF",
+    courseCode: "CVE 401",
+    department: "Civil Engineering",
+    level: "400L",
+    semester: "First Semester",
+    type: "Lecture Note",
+    medium: "PDF",
+    status: "PENDING_REVIEW",
+  });
+
+  await addSavedResource({
+    userId: "usr_owner",
+    resourceId: sub.id,
+    title: sub.title,
+    courseCode: sub.courseCode,
+    department: sub.department,
+    type: sub.type,
+  });
+
+  const savedBefore = await getSavedResources("usr_owner");
+  assert.ok(savedBefore.some((s) => s.resourceId === sub.id));
+
+  await deleteSubmissionWithChecks({ userId: "usr_owner", role: "STUDENT" }, sub.id);
+
+  const savedAfter = await getSavedResources("usr_owner");
+  assert.equal(savedAfter.some((s) => s.resourceId === sub.id), false);
+});
+
+test("getClientIp prefers edge headers and uses first IP in x-forwarded-for chain", () => {
+  const cfReq = new Request("http://localhost", {
+    headers: { "cf-connecting-ip": "197.210.85.12" },
+  });
+  assert.equal(getClientIp(cfReq), "197.210.85.12");
+
+  const xffReq = new Request("http://localhost", {
+    headers: { "x-forwarded-for": "102.89.34.1, 10.0.0.1, 127.0.0.1" },
+  });
+  assert.equal(getClientIp(xffReq), "102.89.34.1");
 });

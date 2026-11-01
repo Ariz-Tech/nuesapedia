@@ -22,12 +22,17 @@ if (!connectionString) {
 const schemaPath = path.join(rootDir, "lib", "db", "schema.sql");
 const sql = fs.readFileSync(schemaPath, "utf8");
 
+const rejectUnauthorized =
+  process.env.PG_SSL_REJECT_UNAUTHORIZED !== undefined
+    ? process.env.PG_SSL_REJECT_UNAUTHORIZED === "true"
+    : process.env.NODE_ENV === "production";
+
 const pool = new pg.Pool({
   connectionString,
   ssl:
     connectionString.includes("localhost") || connectionString.includes("127.0.0.1")
       ? false
-      : { rejectUnauthorized: false },
+      : { rejectUnauthorized },
 });
 
 try {

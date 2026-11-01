@@ -72,9 +72,24 @@ export async function POST(req: Request) {
     const { rawToken, tokenHash } = generateResetToken();
     await createPasswordResetToken(user.id, tokenHash, 15);
 
-    const origin =
-      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-      new URL(req.url).origin;
+    const configuredOrigin =
+      process.env.APP_URL?.replace(/\/$/, "") ||
+      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+
+    let origin = configuredOrigin;
+    if (!origin) {
+      if (process.env.NODE_ENV === "production") {
+        console.warn(
+          "[auth] Warning: APP_URL or NEXT_PUBLIC_APP_URL is not set in production. Falling back to request origin."
+        );
+      }
+      try {
+        const parsed = new URL(req.url);
+        origin = parsed.origin;
+      } catch {
+        origin = "https://nuesapedia.org";
+      }
+    }
     const resetUrl = `${origin}/forgot-password?token=${encodeURIComponent(rawToken)}`;
 
     const delivery = await sendPasswordResetEmail({
