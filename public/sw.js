@@ -1,6 +1,6 @@
-// NUESApedia Service Worker v5 — Privacy-Preserving Offline Caching (Zero Shared-PC Session Leaks)
-const SHELL_CACHE = "nuesapedia-shell-v5";
-const DATA_CACHE = "nuesapedia-public-data-v5";
+// NUESApedia Service Worker v6 — Privacy-Preserving Offline Caching (Zero Shared-PC Session Leaks)
+const SHELL_CACHE = "nuesapedia-shell-v6";
+const DATA_CACHE = "nuesapedia-public-data-v6";
 
 const STATIC_ASSETS = [
   "/manifest.webmanifest",

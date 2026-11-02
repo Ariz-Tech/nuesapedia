@@ -70,7 +70,7 @@ const LEVELS = ["100L", "200L", "300L", "400L", "500L"];
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { refresh: refreshAuth, logout: authLogout } = useAuth();
+  const { user: authUser, loading: authLoading, refresh: refreshAuth, logout: authLogout } = useAuth();
   const { savedCount, offlineCount, offlineTotalBytes } = useSavedResources();
 
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -95,29 +95,32 @@ export default function ProfilePage() {
   const [passwordMsg, setPasswordMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
+    if (authLoading) return;
     let active = true;
 
-    async function loadProfileData() {
+    if (!authUser) {
+      router.push("/login?redirect=/profile");
+      return;
+    }
+
+    const u: UserProfile = {
+      id: authUser.id,
+      name: authUser.name,
+      email: authUser.email,
+      department: authUser.department,
+      level: authUser.level,
+      avatar: authUser.avatar,
+      role: authUser.role || "STUDENT",
+      createdAt: authUser.createdAt,
+    };
+    setUser(u);
+    setEditName(u.name || "");
+    setEditDept(isKnownDepartment(u.department) ? u.department : DEPARTMENTS[0]);
+    setEditLevel(LEVELS.includes(u.level) ? u.level : "100L");
+
+    async function loadUploads() {
       try {
-        const [meRes, subRes] = await Promise.all([
-          fetch("/api/auth/me", { cache: "no-store" }),
-          fetch("/api/uploads", { cache: "no-store" }),
-        ]);
-
-        const meData = await meRes.json().catch(() => null);
-        if (!active) return;
-
-        if (!meRes.ok || !meData?.success) {
-          router.push("/login?redirect=/profile");
-          return;
-        }
-
-        const u: UserProfile = meData.user;
-        setUser(u);
-        setEditName(u.name || "");
-        setEditDept(isKnownDepartment(u.department) ? u.department : DEPARTMENTS[0]);
-        setEditLevel(LEVELS.includes(u.level) ? u.level : "100L");
-
+        const subRes = await fetch("/api/uploads", { cache: "no-store" });
         if (subRes.ok) {
           const subData = await subRes.json().catch(() => null);
           if (active && subData?.success) {
@@ -125,10 +128,7 @@ export default function ProfilePage() {
           }
         }
       } catch (err) {
-        console.error("Failed to load profile:", err);
-        if (active) {
-          router.push("/login?redirect=/profile");
-        }
+        console.error("Failed to load user uploads:", err);
       } finally {
         if (active) {
           setLoading(false);
@@ -136,11 +136,11 @@ export default function ProfilePage() {
       }
     }
 
-    void loadProfileData();
+    void loadUploads();
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [authUser, authLoading, router]);
 
   const handleRollAvatar = async () => {
     if (!user) return;

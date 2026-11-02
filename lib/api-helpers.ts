@@ -160,3 +160,49 @@ export function extractYouTubeId(url: string | null | undefined): string | null 
 export const extractYoutubeId = (url?: string | null): string | undefined =>
   extractYouTubeId(url) ?? undefined;
 
+/**
+ * Validates that an object storage key is safe against path traversal,
+ * null-byte injection, URL-encoded traversal sequences (%2e%2e, %252e%252e),
+ * and backslash path separator manipulation.
+ */
+export function isSafeStorageKey(rawKey: unknown): rawKey is string {
+  if (!rawKey || typeof rawKey !== "string") return false;
+  const trimmed = rawKey.trim();
+  if (!trimmed.startsWith("uploads/") || trimmed.length > 300) return false;
+
+  // Immediate rejection of literal traversal or backslashes
+  if (trimmed.includes("..") || trimmed.includes("\\")) return false;
+
+  // Fully decode URL encodings iteratively to prevent multi-layer bypasses (e.g., %252e%252e)
+  let decoded = trimmed;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      return false; // Malformed percent-encoding
+    }
+  }
+
+  // Check fully decoded string for path traversal, backslashes, and null bytes
+  if (
+    decoded.includes("..") ||
+    decoded.includes("\\") ||
+    decoded.includes("\0")
+  ) {
+    return false;
+  }
+
+  // Segments validation: no segment may be '.' or '..'
+  const segments = decoded.split("/");
+  for (const segment of segments) {
+    if (segment === ".." || segment === ".") {
+      return false;
+    }
+  }
+
+  // Restrict key characters strictly to safe POSIX path characters
+  return /^uploads\/[a-zA-Z0-9_\-\.\/]+$/.test(trimmed);
+}
+

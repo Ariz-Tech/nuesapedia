@@ -19,9 +19,18 @@ interface RateLimitEntry {
 
 const memoryRateLimitStore = new Map<string, RateLimitEntry>();
 
+const IPV4_REGEX =
+  /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+const IPV6_REGEX =
+  /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^::1$|^([0-9a-fA-F]{1,4}:)+::?([0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}$/;
+
+function isValidIp(ip: string): boolean {
+  return IPV4_REGEX.test(ip) || IPV6_REGEX.test(ip);
+}
+
 function checkMemoryRateLimit(key: string, config: RateLimitConfig): RateLimitResult {
   const now = Date.now();
-  if (memoryRateLimitStore.size > 5000) {
+  if (memoryRateLimitStore.size > 2000) {
     for (const [k, v] of memoryRateLimitStore.entries()) {
       if (v.resetAt <= now) memoryRateLimitStore.delete(k);
     }
@@ -95,6 +104,15 @@ export async function checkRateLimit(
     const resetAt = Math.round(Number(row.reset_ms));
     const retryAfterSeconds = Math.max(1, Math.ceil((resetAt - now) / 1000));
 
+    // Opportunistically prune expired rate-limit records (~2% of requests) to prevent table bloat
+    if (Math.random() < 0.02) {
+      void db
+        .query(
+          `DELETE FROM rate_limits WHERE reset_at < CURRENT_TIMESTAMP - INTERVAL '1 hour'`
+        )
+        .catch(() => {});
+    }
+
     if (count > config.limit) {
       return {
         allowed: false,
@@ -116,17 +134,27 @@ export async function checkRateLimit(
 }
 
 /**
- * Extracts client IP preferring edge/platform-verified headers over raw spoofable chains.
+ * Extracts client IP preferring edge/platform-verified headers over raw spoofable chains,
+ * and validates that extracted IPs conform to valid IPv4 or IPv6 structure.
  */
 export function getClientIp(req: Request): string {
   const cfIp = req.headers.get("cf-connecting-ip");
-  if (cfIp) return cfIp.trim();
+  if (cfIp) {
+    const trimmed = cfIp.trim();
+    if (isValidIp(trimmed)) return trimmed;
+  }
 
   const vercelIp = req.headers.get("x-vercel-forwarded-for");
-  if (vercelIp) return vercelIp.split(",")[0].trim();
+  if (vercelIp) {
+    const candidate = vercelIp.split(",")[0].trim();
+    if (isValidIp(candidate)) return candidate;
+  }
 
   const realIp = req.headers.get("x-real-ip");
-  if (realIp) return realIp.trim();
+  if (realIp) {
+    const trimmed = realIp.trim();
+    if (isValidIp(trimmed)) return trimmed;
+  }
 
   const forwarded = req.headers.get("x-forwarded-for");
   if (forwarded) {
@@ -134,8 +162,10 @@ export function getClientIp(req: Request): string {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    if (parts.length > 0) {
-      return parts[0];
+    for (const part of parts) {
+      if (isValidIp(part)) {
+        return part;
+      }
     }
   }
 

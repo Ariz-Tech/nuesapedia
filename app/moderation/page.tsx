@@ -26,6 +26,7 @@ import {
 import { DEPARTMENTS } from "@/lib/departments";
 import { extractApiError } from "@/lib/api-helpers";
 import YoutubeIcon from "@/components/icons/YoutubeIcon";
+import { useAuth } from "@/context/AuthContext";
 
 interface UserProfile {
   id: string;
@@ -105,6 +106,7 @@ const PRESET_REJECTION_REASONS = [
 ];
 
 export default function ModerationPortalPage() {
+  const { user: authUser, loading: authLoading } = useAuth();
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
 
@@ -137,20 +139,24 @@ export default function ModerationPortalPage() {
   const [resourceReports, setResourceReports] = useState<ResourceReportItem[]>([]);
   const [reportsLoading, setReportsLoading] = useState(false);
 
-  // Check auth on mount
+  // Synchronize auth state from AuthContext without duplicate network roundtrip
   useEffect(() => {
-    fetch("/api/auth/me")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.success && data?.user) {
-          setCurrentUser(data.user);
-        } else {
-          setCurrentUser(null);
-        }
-      })
-      .catch(() => setCurrentUser(null))
-      .finally(() => setLoadingAuth(false));
-  }, []);
+    if (authLoading) return;
+    if (authUser) {
+      setCurrentUser({
+        id: authUser.id,
+        name: authUser.name,
+        email: authUser.email,
+        role: authUser.role || "STUDENT",
+        department: authUser.department,
+        level: authUser.level,
+        avatar: authUser.avatar,
+      });
+    } else {
+      setCurrentUser(null);
+    }
+    setLoadingAuth(false);
+  }, [authUser, authLoading]);
 
   const fetchSubmissions = useCallback(async () => {
     setQueueLoading(true);

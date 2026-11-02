@@ -9,7 +9,10 @@ import React, {
   useRef,
 } from "react";
 import { clearUserSavedCache } from "@/lib/saved-client";
-import { clearLocalReadingProgress } from "@/lib/offline-vault";
+import {
+  clearLocalReadingProgress,
+  clearAllOfflineDocuments,
+} from "@/lib/offline-vault";
 
 export interface AuthUser {
   id: string;
@@ -81,6 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Purge user-scoped local caches so shared computers never leak data to the next user
     clearUserSavedCache(activeUserId);
     await clearLocalReadingProgress();
+    await clearAllOfflineDocuments();
     if (typeof navigator !== "undefined" && navigator.serviceWorker?.controller) {
       navigator.serviceWorker.controller.postMessage({ type: "CLEAR_USER_CACHE" });
     }

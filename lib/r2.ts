@@ -78,13 +78,12 @@ export async function getSignedDownloadUrl(params: {
   expiresInSeconds?: number;
 }): Promise<string | null> {
   const disposition = params.disposition || "attachment";
-
-  if (disposition === "inline" && R2_PUBLIC_URL) {
-    return `${R2_PUBLIC_URL.replace(/\/$/, "")}/${params.key}`;
-  }
-
   const client = getR2Client();
+
   if (!client) {
+    if (disposition === "inline" && R2_PUBLIC_URL) {
+      return `${R2_PUBLIC_URL.replace(/\/$/, "")}/${params.key}`;
+    }
     if (process.env.NODE_ENV !== "production") {
       return `/api/uploads/mock-r2?key=${encodeURIComponent(params.key)}`;
     }

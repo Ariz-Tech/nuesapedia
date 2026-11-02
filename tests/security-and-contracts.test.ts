@@ -22,6 +22,7 @@ import {
   extractYouTubeId,
   extractYoutubeId,
   parseSizeToBytes,
+  isSafeStorageKey,
 } from "@/lib/api-helpers";
 import { DEPARTMENTS, getDepartmentBySlug, resolveDepartment } from "@/lib/departments";
 import {
@@ -200,7 +201,7 @@ test("Moderation boundary & deletion protection on submissions", async () => {
   );
   assert.equal(modDelete.deleted, true);
 
-  // Rejection clears r2Key and stores rejectionReason
+  // Rejection preserves r2Key for audit/appeal and stores rejectionReason
   const rejected = await updateSubmissionStatus(
     pending.id,
     "REJECTED",
@@ -210,7 +211,7 @@ test("Moderation boundary & deletion protection on submissions", async () => {
   );
   assert.ok(rejected);
   assert.equal(rejected.status, "REJECTED");
-  assert.equal(rejected.r2Key, undefined);
+  assert.equal(rejected.r2Key, "uploads/mech/MEE301/sub_pending_1_notes.pdf");
   assert.equal(rejected.rejectionReason, "Corrupted scan pages");
 });
 
@@ -236,6 +237,44 @@ test("API contract helpers prevent [object Object], weak passwords, and open red
   assert.equal(getSafeRedirectPath("//evil.example.com"), "/profile");
   assert.equal(getSafeRedirectPath("/login"), "/profile");
   assert.equal(formatBytes(2 * 1024 * 1024), "2.00 MB");
+});
+
+test("isSafeStorageKey blocks literal and URL-encoded path traversal attacks", () => {
+  // Valid storage keys
+  assert.equal(
+    isSafeStorageKey("uploads/civil/CVE201/sub_123_notes.pdf"),
+    true
+  );
+  assert.equal(
+    isSafeStorageKey("uploads/mech/MEE301/sub_abc_exam.pdf"),
+    true
+  );
+
+  // Literal traversal & path manipulation
+  assert.equal(isSafeStorageKey("uploads/../etc/passwd"), false);
+  assert.equal(isSafeStorageKey("uploads/..\\secret.pdf"), false);
+  assert.equal(isSafeStorageKey("uploads/dir/../../secret.pdf"), false);
+  assert.equal(isSafeStorageKey("uploads/secret\\file.pdf"), false);
+  assert.equal(isSafeStorageKey("uploads/./file.pdf"), false);
+
+  // Single URL-encoded traversal (%2e is '.', %2f is '/', %5c is '\')
+  assert.equal(isSafeStorageKey("uploads/%2e%2e/secret.pdf"), false);
+  assert.equal(isSafeStorageKey("uploads/%2e%2e%2fsecret.pdf"), false);
+  assert.equal(isSafeStorageKey("uploads/..%2fsecret.pdf"), false);
+  assert.equal(isSafeStorageKey("uploads/%2e%2e%5csecret.pdf"), false);
+  assert.equal(isSafeStorageKey("uploads/test%5csecret.pdf"), false);
+
+  // Double URL-encoded traversal (%252e is double-encoded '.')
+  assert.equal(isSafeStorageKey("uploads/%252e%252e/secret.pdf"), false);
+  assert.equal(isSafeStorageKey("uploads/%252e%252e%252fsecret.pdf"), false);
+
+  // Null byte injection & invalid prefixes
+  assert.equal(isSafeStorageKey("uploads/\0secret.pdf"), false);
+  assert.equal(isSafeStorageKey("uploads/%00secret.pdf"), false);
+  assert.equal(isSafeStorageKey("/etc/passwd"), false);
+  assert.equal(isSafeStorageKey(""), false);
+  assert.equal(isSafeStorageKey(null), false);
+  assert.equal(isSafeStorageKey(undefined), false);
 });
 
 test("Rate limiter enforces threshold within window", async () => {

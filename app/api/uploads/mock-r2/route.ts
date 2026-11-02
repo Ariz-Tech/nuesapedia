@@ -1,6 +1,6 @@
 import { getSession } from "@/lib/auth";
 import { isR2Configured, MAX_PDF_UPLOAD_BYTES } from "@/lib/r2";
-import { apiError, apiSuccess } from "@/lib/api-helpers";
+import { apiError, apiSuccess, isSafeStorageKey } from "@/lib/api-helpers";
 import { mockR2Store } from "@/lib/mock-r2-store";
 
 /**
@@ -11,16 +11,6 @@ import { mockR2Store } from "@/lib/mock-r2-store";
 
 function isMockAllowed(): boolean {
   return process.env.NODE_ENV !== "production" && !isR2Configured;
-}
-
-function isSafeStorageKey(key: string | null): key is string {
-  if (!key) return false;
-  return (
-    key.startsWith("uploads/") &&
-    !key.includes("..") &&
-    !key.includes("\\") &&
-    key.length <= 300
-  );
 }
 
 export async function PUT(req: Request) {

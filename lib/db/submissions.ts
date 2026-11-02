@@ -505,30 +505,27 @@ export async function updateSubmissionStatus(
       reviewedById: reviewedById ?? null,
       reviewedAt,
       rejectionReason: status === "REJECTED" ? rejectionReason : undefined,
-      r2Key: status === "REJECTED" ? undefined : devStore.submissions[idx].r2Key,
+      r2Key: devStore.submissions[idx].r2Key,
     };
     return devStore.submissions[idx];
   }
 
   const db = await getReadyDb();
-  const clearR2Key = status === "REJECTED";
   const res = await db.query(
     `UPDATE submissions
      SET status = $1,
          reviewed_by = $2,
          reviewed_by_id = $3,
          reviewed_at = $4::timestamptz,
-         rejection_reason = $5,
-         r2_key = CASE WHEN $6::boolean THEN NULL ELSE r2_key END
-     WHERE id = $7
+         rejection_reason = $5
+     WHERE id = $6
      RETURNING *`,
     [
       status,
       reviewedBy,
       reviewedById ?? null,
       reviewedAt,
-      clearR2Key ? rejectionReason ?? null : null,
-      clearR2Key,
+      status === "REJECTED" ? rejectionReason ?? null : null,
       id,
     ]
   );

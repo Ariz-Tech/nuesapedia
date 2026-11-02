@@ -11,7 +11,12 @@ import {
   MAX_PDF_UPLOAD_BYTES,
 } from "@/lib/r2";
 import { mockR2Store } from "@/lib/mock-r2-store";
-import { apiError, apiSuccess, formatBytes } from "@/lib/api-helpers";
+import {
+  apiError,
+  apiSuccess,
+  formatBytes,
+  isSafeStorageKey,
+} from "@/lib/api-helpers";
 
 /**
  * POST /api/uploads/:id/complete
@@ -48,10 +53,14 @@ export async function POST(
     }
 
     const body = await req.json().catch(() => ({}));
-    const targetKey = submission.r2Key || (typeof body?.r2Key === "string" ? body.r2Key : undefined);
+    // Strict storage key binding: cannot substitute arbitrary bucket keys or traversal sequences
+    let targetKey: string | undefined = submission.r2Key;
+    if (!targetKey && isSafeStorageKey(body?.r2Key)) {
+      targetKey = body.r2Key.trim();
+    }
 
-    if (!targetKey) {
-      return apiError("VALIDATION_ERROR", "Missing storage object key.", 400);
+    if (!targetKey || !isSafeStorageKey(targetKey)) {
+      return apiError("VALIDATION_ERROR", "Missing or invalid storage object key.", 400);
     }
 
     let verifiedBytes: number | null = submission.fileSizeBytes ?? null;
@@ -61,7 +70,7 @@ export async function POST(
       if (!check.valid) {
         await deleteR2Object(targetKey);
         await deleteSubmissionWithChecks(
-          { userId: session.userId, role: "ADMIN" },
+          { userId: session.userId, role: session.role },
           id
         );
         return apiError(
@@ -75,7 +84,7 @@ export async function POST(
       const mockObj = mockR2Store.get(targetKey);
       if (!mockObj) {
         await deleteSubmissionWithChecks(
-          { userId: session.userId, role: "ADMIN" },
+          { userId: session.userId, role: session.role },
           id
         );
         return apiError(

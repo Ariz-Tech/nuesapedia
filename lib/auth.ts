@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { findUserById, isConfiguredAdminEmail } from "./db/users";
 import { getReadyDb, isDevMemoryMode, devStore } from "./db/pool";
@@ -167,8 +168,9 @@ async function ensureBootstrapAdminRole(userId: string, email: string, currentRo
 /**
  * Resolves the active session cookie AND validates user existence, live RBAC role,
  * and `sessionVersion` against PostgreSQL so password resets and role demotions take effect immediately.
+ * Wrapped in React `cache()` so multiple calls within the same server render pass execute only once.
  */
-export async function getSession(): Promise<SessionPayload | null> {
+export const getSession = cache(async function getSession(): Promise<SessionPayload | null> {
   try {
     const cookieStore = await cookies();
     const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
@@ -200,4 +202,4 @@ export async function getSession(): Promise<SessionPayload | null> {
   } catch {
     return null;
   }
-}
+});

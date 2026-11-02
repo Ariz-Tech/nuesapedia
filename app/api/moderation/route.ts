@@ -87,11 +87,8 @@ export async function PATCH(req: Request) {
       return apiError("NOT_FOUND", "Submission not found.", 404);
     }
 
-    // Garbage-collect rejected R2 objects so rejected uploads don't leak storage costs
-    if (status === "REJECTED" && existing.r2Key) {
-      await deleteR2Object(existing.r2Key);
-    }
-
+    // Retain storage object pointer on rejection for audit, contributor review, or appeal.
+    // Permanent purge is mediated by explicit contributor withdrawal or lifecycle rules.
     return apiSuccess({ submission: updated });
   } catch (error) {
     console.error("PATCH /api/moderation error:", error);

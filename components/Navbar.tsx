@@ -15,13 +15,7 @@ export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user } = useAuth();
-  const { savedCount, offlineCount, savedIds, offlineIds } = useSavedResources();
-
-  // Combined count of unique saved + downloaded items on the Saved shelf
-  const shelfCount = useMemo(() => {
-    const union = new Set<string>([...savedIds, ...offlineIds]);
-    return union.size;
-  }, [savedIds, offlineIds]);
+  const { savedCount, offlineCount, shelfCount } = useSavedResources();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [navQuery, setNavQuery] = useState("");

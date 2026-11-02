@@ -33,6 +33,7 @@ interface SavedResourcesContextValue {
   savedItems: CourseMaterialItem[];
   savedIds: Set<string>;
   savedCount: number;
+  shelfCount: number;
   isAuthenticated: boolean;
   loadingSaved: boolean;
   isSaved: (id: string) => boolean;
@@ -247,11 +248,19 @@ export function SavedResourcesProvider({ children }: { children: ReactNode }) {
     await refreshOfflineVault();
   }, [refreshOfflineVault]);
 
+  const shelfCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const item of savedItems) ids.add(item.id);
+    for (const doc of offlineDocs) ids.add(doc.id);
+    return ids.size;
+  }, [savedItems, offlineDocs]);
+
   const value = useMemo<SavedResourcesContextValue>(
     () => ({
       savedItems,
       savedIds,
       savedCount: savedItems.length,
+      shelfCount,
       isAuthenticated: Boolean(activeUserId),
       loadingSaved,
       isSaved,
@@ -273,6 +282,7 @@ export function SavedResourcesProvider({ children }: { children: ReactNode }) {
     [
       savedItems,
       savedIds,
+      shelfCount,
       activeUserId,
       loadingSaved,
       isSaved,
