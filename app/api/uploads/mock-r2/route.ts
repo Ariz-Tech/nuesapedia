@@ -76,11 +76,6 @@ export async function GET(req: Request) {
     return apiError("NOT_FOUND", "Endpoint not available.", 404);
   }
 
-  const session = await getSession();
-  if (!session) {
-    return apiError("UNAUTHORIZED", "Authentication required.", 401);
-  }
-
   const { searchParams } = new URL(req.url);
   const key = searchParams.get("key");
   if (!isSafeStorageKey(key)) {

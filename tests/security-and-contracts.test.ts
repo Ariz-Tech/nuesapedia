@@ -386,3 +386,26 @@ test("File size parsing and byte calculations handle edge cases", () => {
   assert.equal(formatBytes(1024), "1.0 KB");
   assert.equal(formatBytes(1024 * 1024), "1.00 MB");
 });
+
+test("Mock R2 storage allows unauthenticated GET for reading and downloading resources", async () => {
+  const { mockR2Store } = await import("@/lib/mock-r2-store");
+  const { GET: mockR2Get } = await import("@/app/api/uploads/mock-r2/route");
+
+  const testKey = "uploads/test-sample.pdf";
+  const dummyBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]); // %PDF-
+  mockR2Store.set(testKey, {
+    bytes: dummyBytes,
+    sizeBytes: dummyBytes.byteLength,
+    uploadedBy: "test-user",
+    createdAt: Date.now(),
+  });
+
+  const req = new Request(`http://localhost:3000/api/uploads/mock-r2?key=${encodeURIComponent(testKey)}`);
+  const res = await mockR2Get(req);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("Content-Type"), "application/pdf");
+  const body = new Uint8Array(await res.arrayBuffer());
+  assert.equal(body.byteLength, 5);
+});
+
