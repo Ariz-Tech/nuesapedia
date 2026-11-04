@@ -118,11 +118,29 @@ export function normalizeDbError(err: unknown): Error {
   return new Error(typeof err === "string" && err ? err : "Unknown database error");
 }
 
+export function isTransientConnectionError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  const code = (err as { code?: string })?.code;
+  return (
+    msg.includes("Connection terminated unexpectedly") ||
+    msg.includes("Connection terminated due to connection timeout") ||
+    msg.includes("timeout exceeded when trying to connect") ||
+    msg.includes("terminating connection due to administrator command") ||
+    code === "ECONNRESET" ||
+    code === "EPIPE" ||
+    code === "ETIMEDOUT" ||
+    code === "57P01" ||
+    code === "57P02" ||
+    code === "57P03"
+  );
+}
+
 function wrapPoolErrors(instance: Pool): Pool {
   const rawQuery = instance.query.bind(instance) as (...args: unknown[]) => unknown;
   const rawConnect = instance.connect.bind(instance) as (...args: unknown[]) => unknown;
 
-  instance.query = ((...args: unknown[]) => {
+  instance.query = (async (...args: unknown[]) => {
     const lastArg = args[args.length - 1];
     if (typeof lastArg === "function") {
       const cb = lastArg as (err: Error | null, res?: unknown) => void;
@@ -131,13 +149,24 @@ function wrapPoolErrors(instance: Pool): Pool {
       };
       return rawQuery(...args);
     }
-    const result = rawQuery(...args);
-    if (result && typeof (result as Promise<unknown>).catch === "function") {
-      return (result as Promise<unknown>).catch((err: unknown) => {
-        throw normalizeDbError(err);
-      });
+
+    try {
+      return await (rawQuery(...args) as Promise<unknown>);
+    } catch (err) {
+      if (isTransientConnectionError(err)) {
+        console.warn(
+          "[db] Transient PostgreSQL connection error caught, retrying query once with fresh connection:",
+          normalizeDbError(err).message
+        );
+        await new Promise((r) => setTimeout(r, 150));
+        try {
+          return await (rawQuery(...args) as Promise<unknown>);
+        } catch (retryErr) {
+          throw normalizeDbError(retryErr);
+        }
+      }
+      throw normalizeDbError(err);
     }
-    return result;
   }) as Pool["query"];
 
   instance.connect = ((...args: unknown[]) => {
@@ -194,8 +223,10 @@ export function getPool(): Pool {
     const nextPool = new Pool({
       connectionString,
       max: Number(process.env.PG_POOL_MAX) || 5,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
+      idleTimeoutMillis: 15000,
+      connectionTimeoutMillis: 15000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
       ssl: isLocal ? false : { rejectUnauthorized },
     });
 

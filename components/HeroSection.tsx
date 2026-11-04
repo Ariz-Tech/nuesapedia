@@ -35,7 +35,7 @@ export default function HeroSection() {
 
         {/* Subtitle */}
         <p className="mt-6 text-base sm:text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">
-          Access course materials, textbooks, past questions, videos, and study resources for{" "}
+          Access course materials, lecture notes, past questions, videos, and study resources for{" "}
           <span className="font-medium text-slate-800">FUOYE engineering courses</span>, all in one place.
         </p>
 

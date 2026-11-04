@@ -66,7 +66,7 @@ export async function POST(
     let verifiedBytes: number | null = submission.fileSizeBytes ?? null;
 
     if (isR2Configured) {
-      const check = await verifyR2PdfObject(targetKey, MAX_PDF_UPLOAD_BYTES);
+      const check = await verifyR2PdfObject(targetKey, MAX_PDF_UPLOAD_BYTES, submission.fileName);
       if (!check.valid) {
         await deleteR2Object(targetKey);
         await deleteSubmissionWithChecks(
@@ -75,7 +75,7 @@ export async function POST(
         );
         return apiError(
           "INVALID_UPLOAD",
-          check.error || "Uploaded file failed PDF verification.",
+          check.error || "Uploaded file failed verification.",
           400
         );
       }

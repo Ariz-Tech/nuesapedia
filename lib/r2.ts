@@ -7,6 +7,7 @@ import {
   HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { getMimeTypeForFilename, verifyDocumentBytes } from "./file-utils";
 
 function cleanCredential(val: string | undefined): string {
   const trimmed = (val || "").trim();
@@ -23,6 +24,7 @@ export const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || "nuesapedia-resource
 export const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || "";
 
 export const MAX_PDF_UPLOAD_BYTES = 30 * 1024 * 1024; // 30 MB
+export const MAX_DOCUMENT_UPLOAD_BYTES = MAX_PDF_UPLOAD_BYTES;
 
 export const isR2Configured = Boolean(
   R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET_NAME
@@ -75,6 +77,7 @@ export async function getSignedDownloadUrl(params: {
   key: string;
   fileName?: string;
   disposition?: "inline" | "attachment";
+  contentType?: string;
   expiresInSeconds?: number;
 }): Promise<string | null> {
   const disposition = params.disposition || "attachment";
@@ -95,10 +98,13 @@ export async function getSignedDownloadUrl(params: {
     "_"
   );
 
+  const contentType =
+    params.contentType || getMimeTypeForFilename(safeName);
+
   const command = new GetObjectCommand({
     Bucket: R2_BUCKET_NAME,
     Key: params.key,
-    ResponseContentType: "application/pdf",
+    ResponseContentType: contentType,
     ResponseContentDisposition: `${disposition}; filename="${safeName}"`,
   });
 
@@ -114,12 +120,13 @@ export interface VerifiedR2Object {
 }
 
 /**
- * Verifies server-side that an uploaded R2 object actually exists, respects the 30MB cap,
- * and starts with the `%PDF-` magic header (`0x25 0x50 0x44 0x46 0x2D`).
+ * Verifies server-side that an uploaded R2 object exists, respects the 30MB cap,
+ * and carries a valid file signature (PDF, Word, Slides, etc.).
  */
-export async function verifyR2PdfObject(
+export async function verifyR2DocumentObject(
   key: string,
-  maxBytes: number = MAX_PDF_UPLOAD_BYTES
+  maxBytes: number = MAX_PDF_UPLOAD_BYTES,
+  fileName?: string
 ): Promise<VerifiedR2Object> {
   const client = getR2Client();
   if (!client) {
@@ -150,21 +157,21 @@ export async function verifyR2PdfObject(
       new GetObjectCommand({
         Bucket: R2_BUCKET_NAME,
         Key: key,
-        Range: "bytes=0-4",
+        Range: "bytes=0-15",
       })
     );
 
     const bytes = await rangeRes.Body?.transformToByteArray();
-    if (!bytes || bytes.length < 5) {
-      return { valid: false, sizeBytes, error: "Uploaded file is too small to be a valid PDF." };
+    if (!bytes || bytes.length === 0) {
+      return { valid: false, sizeBytes, error: "Uploaded file is too small." };
     }
 
-    const magic = Buffer.from(bytes.slice(0, 5)).toString("ascii");
-    if (magic !== "%PDF-") {
+    const check = verifyDocumentBytes(bytes, fileName || key);
+    if (!check.valid) {
       return {
         valid: false,
         sizeBytes,
-        error: "Invalid file signature: uploaded file is not a valid PDF document.",
+        error: check.error || "Invalid file format or signature.",
       };
     }
 
@@ -174,10 +181,12 @@ export async function verifyR2PdfObject(
     if (code === "NotFound" || code === "NoSuchKey") {
       return { valid: false, error: "Upload not found in storage. Please try uploading again." };
     }
-    console.error("verifyR2PdfObject error:", err);
+    console.error("verifyR2DocumentObject error:", err);
     return { valid: false, error: "Could not verify uploaded file in storage." };
   }
 }
+
+export const verifyR2PdfObject = verifyR2DocumentObject;
 
 export async function deleteR2Object(key: string): Promise<boolean> {
   const client = getR2Client();

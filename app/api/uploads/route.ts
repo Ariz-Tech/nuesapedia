@@ -20,6 +20,12 @@ import {
   formatBytes,
   parseSizeToBytes,
 } from "@/lib/api-helpers";
+import {
+  isAllowedDocumentFilename,
+  isAllowedDocumentMimeType,
+  getMimeTypeForFilename,
+  getFileFormatDisplay,
+} from "@/lib/file-utils";
 
 const VALID_LEVELS = ["100L", "200L", "300L", "400L", "500L"];
 const VALID_SEMESTERS = ["First Semester", "Second Semester"];
@@ -29,10 +35,6 @@ const VALID_MATERIAL_TYPES = [
   "Lecture Notes",
   "Past Question",
   "Past Questions",
-  "Textbook",
-  "Textbooks",
-  "Lab Manual",
-  "Formula Sheet / Summary",
   "Tutorial / Problem Set",
   "Full Lecture Recording",
   "Concept / Topic Explainer",
@@ -99,7 +101,9 @@ export async function POST(req: Request) {
       youtubeUrl,
     } = body ?? {};
 
-    if (!title || !courseCode || !department || !level || !type || !medium) {
+    const effectiveType = medium === "YOUTUBE" ? "Video Tutorial" : String(type || "");
+
+    if (!title || !courseCode || !department || !level || !effectiveType || !medium) {
       return apiError(
         "VALIDATION_ERROR",
         "Title, course code, department, level, material type, and medium are required.",
@@ -138,7 +142,7 @@ export async function POST(req: Request) {
       return apiError("VALIDATION_ERROR", "Invalid semester.", 400);
     }
 
-    if (!VALID_MATERIAL_TYPES.includes(String(type))) {
+    if (!VALID_MATERIAL_TYPES.includes(effectiveType)) {
       return apiError("VALIDATION_ERROR", "Invalid material type.", 400);
     }
 
@@ -173,7 +177,7 @@ export async function POST(req: Request) {
         level: String(level),
         semester: cleanSemester,
         sessionYear: sessionYear ? String(sessionYear).slice(0, 20) : "2025/2026",
-        type,
+        type: "Video Tutorial",
         medium: "YOUTUBE",
         description: description ? String(description).trim().slice(0, 1000) : undefined,
         fileUrl: canonicalYoutubeUrl,
@@ -187,7 +191,7 @@ export async function POST(req: Request) {
       return apiSuccess({ submission }, 201);
     }
 
-    // PDF Direct-to-R2 Flow
+    // Document / Slides Direct-to-R2 Flow
     if (process.env.NODE_ENV === "production" && !isR2Configured) {
       return apiError(
         "STORAGE_UNCONFIGURED",
@@ -200,8 +204,12 @@ export async function POST(req: Request) {
       .replace(/[^a-zA-Z0-9._-]/g, "_")
       .slice(-120);
 
-    if (!safeFileName.toLowerCase().endsWith(".pdf")) {
-      return apiError("VALIDATION_ERROR", "Only .pdf files are supported.", 400);
+    if (!isAllowedDocumentFilename(safeFileName)) {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Unsupported file format. Please upload a PDF, Word document (.doc, .docx), slides (.ppt, .pptx), or text file.",
+        400
+      );
     }
 
     const declaredBytes =
@@ -212,14 +220,15 @@ export async function POST(req: Request) {
     if (declaredBytes !== null && (declaredBytes <= 0 || declaredBytes > MAX_PDF_UPLOAD_BYTES)) {
       return apiError(
         "FILE_TOO_LARGE",
-        "PDF file size must be between 1 byte and 30MB.",
+        "File size must be between 1 byte and 30MB.",
         413
       );
     }
 
-    if (contentType && contentType !== "application/pdf") {
-      return apiError("VALIDATION_ERROR", "Content-Type must be application/pdf.", 400);
-    }
+    const resolvedContentType =
+      contentType && isAllowedDocumentMimeType(contentType)
+        ? contentType
+        : getMimeTypeForFilename(safeFileName);
 
     const uploadId = `sub_${crypto.randomBytes(8).toString("hex")}`;
     const deptSlug = department.toLowerCase().replace(/[^a-z0-9]/g, "-");
@@ -228,10 +237,10 @@ export async function POST(req: Request) {
     const signedUploadUrl = isR2Configured
       ? await generateSignedUploadUrl({
           key: r2Key,
-          contentType: "application/pdf",
+          contentType: resolvedContentType,
           expiresInSeconds: 600,
         })
-      : `/api/uploads/mock-r2?key=${encodeURIComponent(r2Key)}`;
+      : `/api/uploads/mock-r2?key=${encodeURIComponent(r2Key)}&fileName=${encodeURIComponent(safeFileName)}`;
 
     if (!signedUploadUrl) {
       return apiError(
@@ -240,6 +249,8 @@ export async function POST(req: Request) {
         500
       );
     }
+
+    const formatInfo = getFileFormatDisplay(safeFileName);
 
     // Start in UPLOADING state so incomplete browser uploads never enter moderators' PENDING_REVIEW queue.
     const submission = await createSubmission({
@@ -251,7 +262,7 @@ export async function POST(req: Request) {
       level: String(level),
       semester: cleanSemester,
       sessionYear: sessionYear ? String(sessionYear).slice(0, 20) : "2025/2026",
-      type,
+      type: effectiveType,
       medium: "PDF",
       description: description ? String(description).trim().slice(0, 1000) : undefined,
       fileName: fileName ? String(fileName).slice(0, 255) : safeFileName,
@@ -259,7 +270,7 @@ export async function POST(req: Request) {
         ? formatBytes(declaredBytes)
         : fileSize
           ? String(fileSize).slice(0, 50)
-          : "PDF Document",
+          : formatInfo.label,
       fileSizeBytes: declaredBytes,
       r2Key,
       status: "UPLOADING",

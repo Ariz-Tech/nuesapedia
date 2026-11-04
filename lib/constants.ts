@@ -18,9 +18,6 @@ export type SubmissionStatusType = (typeof SUBMISSION_STATUSES)[number];
 export const MATERIAL_CATEGORIES = [
   "Lecture Note",
   "Past Question",
-  "Textbook",
-  "Lab Manual",
-  "Formula Sheet / Summary",
   "Video Tutorial",
 ] as const;
 export type MaterialCategory = (typeof MATERIAL_CATEGORIES)[number];

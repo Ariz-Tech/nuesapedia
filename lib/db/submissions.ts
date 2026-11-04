@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cache } from "react";
 import { COURSE_REGISTRY, resolveCourseMetadata } from "../courses";
 import { parseSizeToBytes } from "../api-helpers";
 import { devStore, getReadyDb, isDevMemoryMode } from "./pool";
@@ -353,7 +354,7 @@ export async function deleteSubmission(
   return result.deleted;
 }
 
-export async function getSubmissionById(
+export const getSubmissionById = cache(async function getSubmissionById(
   submissionId: string
 ): Promise<DbSubmission | null> {
   if (isDevMemoryMode()) {
@@ -367,7 +368,7 @@ export async function getSubmissionById(
   );
 
   return res.rows[0] ? mapSubmissionRow(res.rows[0]) : null;
-}
+});
 
 export async function getResourceById(
   resourceId: string
@@ -534,18 +535,10 @@ export async function updateSubmissionStatus(
 }
 
 /**
- * Returns canonical courses merged with chronological latest approved submissions
- * (replacing alphabetical `MAX(title)` bug with `DISTINCT ON` ordered by `created_at DESC`).
+ * Returns courses derived strictly from approved uploaded materials.
  */
 export async function getApprovedCourses(): Promise<DbCourse[]> {
   const courseMap = new Map<string, DbCourse>();
-
-  for (const reg of Object.values(COURSE_REGISTRY)) {
-    courseMap.set(reg.code.toUpperCase(), {
-      ...reg,
-      resourceCount: 0,
-    });
-  }
 
   if (isDevMemoryMode()) {
     const approved = devStore.submissions.filter((s) => s.status === "APPROVED");

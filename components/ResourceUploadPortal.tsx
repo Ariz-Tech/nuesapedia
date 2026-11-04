@@ -19,6 +19,11 @@ import type { DbSubmission } from "@/lib/db";
 import { extractApiError, extractYouTubeId } from "@/lib/api-helpers";
 import YoutubeIcon from "@/components/icons/YoutubeIcon";
 import { DEPARTMENTS, isKnownDepartment } from "@/lib/departments";
+import {
+  isAllowedDocumentFilename,
+  getMimeTypeForFilename,
+  getFileFormatDisplay,
+} from "@/lib/file-utils";
 
 export type { DbSubmission };
 
@@ -27,18 +32,9 @@ const LEVELS = ["100L", "200L", "300L", "400L", "500L"];
 const PDF_CATEGORIES = [
   "Lecture Note",
   "Past Question",
-  "Textbook",
-  "Lab Manual",
-  "Formula Sheet / Summary",
 ];
 
-const VIDEO_CATEGORIES = [
-  "Video Tutorial",
-  "Exam Walkthrough",
-  "Lab Demonstration",
-  "Lecture Series",
-  "Concept Crash Course",
-];
+const VIDEO_CATEGORY = "Video Tutorial";
 
 const SEMESTERS = ["First Semester", "Second Semester"];
 const SESSIONS = ["2025/2026", "2024/2025", "2023/2024", "2022/2023", "2021/2022", "Older"];
@@ -102,7 +98,7 @@ export default function ResourceUploadPortal({
     setMedium(newMedium);
     setErrorMessage("");
     if (newMedium === "YOUTUBE") {
-      setType(VIDEO_CATEGORIES[0]);
+      setType(VIDEO_CATEGORY);
     } else {
       setType(PDF_CATEGORIES[0]);
     }
@@ -134,17 +130,14 @@ export default function ResourceUploadPortal({
 
   const validateAndSetFile = (selectedFile: File) => {
     setErrorMessage("");
-    if (
-      selectedFile.type !== "application/pdf" &&
-      !selectedFile.name.toLowerCase().endsWith(".pdf")
-    ) {
-      setErrorMessage("Please select a valid PDF file (.pdf). Other formats are not accepted.");
+    if (!isAllowedDocumentFilename(selectedFile.name)) {
+      setErrorMessage("Please select a supported document file (.pdf, .doc, .docx, .ppt, .pptx, or .txt).");
       return;
     }
 
     const maxBytes = 30 * 1024 * 1024; // 30 MB
     if (selectedFile.size > maxBytes) {
-      setErrorMessage("The selected PDF file exceeds the 30MB limit. Please compress it before uploading.");
+      setErrorMessage("The selected file exceeds the 30MB limit. Please compress it before uploading.");
       return;
     }
 
@@ -152,7 +145,7 @@ export default function ResourceUploadPortal({
 
     // Auto-generate a title suggestion if not provided
     if (!title) {
-      const cleanName = selectedFile.name.replace(/\.pdf$/i, "").replace(/[_-]/g, " ");
+      const cleanName = selectedFile.name.replace(/\.[a-zA-Z0-9]+$/i, "").replace(/[_-]/g, " ");
       setTitle(cleanName);
     }
   };
@@ -174,7 +167,7 @@ export default function ResourceUploadPortal({
     }
 
     if (medium === "PDF" && !file) {
-      setErrorMessage("Please select a PDF document to upload.");
+      setErrorMessage("Please select a document or slide file to upload.");
       return;
     }
 
@@ -207,7 +200,7 @@ export default function ResourceUploadPortal({
             level,
             semester,
             sessionYear,
-            type,
+            type: VIDEO_CATEGORY,
             medium: "YOUTUBE",
             description: description.trim(),
             youtubeUrl: youtubeUrl.trim(),
@@ -245,7 +238,7 @@ export default function ResourceUploadPortal({
             fileName: file!.name,
             fileSize: `${(file!.size / (1024 * 1024)).toFixed(1)} MB`,
             fileSizeBytes: file!.size,
-            contentType: file!.type || "application/pdf",
+            contentType: file!.type || getMimeTypeForFilename(file!.name),
           }),
         });
 
@@ -272,14 +265,14 @@ export default function ResourceUploadPortal({
         const uploadResponse = await fetch(uploadUrl, {
           method: "PUT",
           headers: {
-            "Content-Type": "application/pdf",
+            "Content-Type": file!.type || getMimeTypeForFilename(file!.name),
           },
           body: file!,
         });
 
         if (!uploadResponse.ok) {
           throw new Error(
-            "Direct upload to storage failed. Please ensure the file is a valid PDF under 30MB."
+            "Direct upload to storage failed. Please ensure the file is under 30MB and is a valid format."
           );
         }
 
@@ -473,7 +466,7 @@ export default function ResourceUploadPortal({
             </div>
             <div>
               <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                <span>PDF Document</span>
+                <span>Document or Slides</span>
                 {medium === "PDF" && (
                   <span className="text-[10px] font-semibold text-[#00875A] bg-emerald-100 px-1.5 py-0.2 rounded-md">
                     Selected
@@ -481,7 +474,7 @@ export default function ResourceUploadPortal({
                 )}
               </div>
               <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
-                Upload past questions, lecture handouts, textbook chapters, or lab manuals (up to 30MB).
+                Upload past questions, lecture handouts, slides, summaries, or notes (up to 30MB).
               </p>
             </div>
           </button>
@@ -527,13 +520,13 @@ export default function ResourceUploadPortal({
         {medium === "PDF" ? (
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
-              Attach PDF File <span className="text-rose-500">*</span>
+              Attach Document or Slides <span className="text-rose-500">*</span>
             </label>
 
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,application/pdf"
+              accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.odp,.rtf,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
               onChange={handleFileInput}
               className="hidden"
               id="pdf-file-upload"
@@ -555,10 +548,10 @@ export default function ResourceUploadPortal({
                   <UploadCloud className="w-6 h-6" />
                 </div>
                 <p className="text-xs sm:text-sm font-semibold text-slate-800">
-                  Click to browse or drag and drop your PDF here
+                  Click to browse or drag and drop your document or slides here
                 </p>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Accepted format: <strong className="text-slate-600">.PDF only</strong> (Maximum file size: 30MB)
+                  Accepted formats: <strong className="text-slate-600">PDF, Word (DOC/DOCX), Slides (PPT/PPTX), Text</strong> (Maximum file size: 30MB)
                 </p>
               </div>
             ) : (
@@ -572,7 +565,7 @@ export default function ResourceUploadPortal({
                       {file.name}
                     </div>
                     <div className="text-[11px] text-slate-500">
-                      {(file.size / (1024 * 1024)).toFixed(2)} MB • Ready for upload
+                      {(file.size / (1024 * 1024)).toFixed(2)} MB • {getFileFormatDisplay(file.name).label} • Ready for upload
                     </div>
                   </div>
                 </div>
@@ -765,33 +758,33 @@ export default function ResourceUploadPortal({
           </div>
         </div>
 
-        {/* Resource Category / Type */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-2">
-            Resource Category <span className="text-rose-500">*</span>
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {(medium === "PDF" ? PDF_CATEGORIES : VIDEO_CATEGORIES).map((cat) => {
-              const selected = type === cat;
-              return (
-                <button
-                  type="button"
-                  key={cat}
-                  onClick={() => setType(cat)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
-                    selected
-                      ? medium === "YOUTUBE"
-                        ? "bg-red-600 text-white shadow-2xs font-semibold"
-                        : "bg-[#00875A] text-white shadow-2xs font-semibold"
-                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                  }`}
-                >
-                  {cat}
-                </button>
-              );
-            })}
+        {/* Resource Category / Type (Document only; Videos are automatically categorized as Video Tutorial) */}
+        {medium === "PDF" && (
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-2">
+              Resource Category <span className="text-rose-500">*</span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {PDF_CATEGORIES.map((cat) => {
+                const selected = type === cat;
+                return (
+                  <button
+                    type="button"
+                    key={cat}
+                    onClick={() => setType(cat)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                      selected
+                        ? "bg-[#00875A] text-white shadow-2xs font-semibold"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Optional Description */}
         <div>

@@ -37,7 +37,9 @@ import {
   Share2,
   Check,
   CheckCircle2,
+  Presentation,
 } from "lucide-react";
+import { getFileFormatDisplay } from "@/lib/file-utils";
 
 interface ResourceReaderClientProps {
   resourceId: string;
@@ -455,7 +457,7 @@ export default function ResourceReaderClient({
                 {pdfSrc && (
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="sm:hidden text-[11px] font-medium text-emerald-900 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-xl">
-                      Mobile tip: tap <strong>Open Fullscreen</strong> for smooth multi-page PDF scrolling.
+                      Mobile tip: tap <strong>Open Fullscreen</strong> for smooth multi-page viewing.
                     </span>
                     <a
                       href={pdfSrc}
@@ -470,7 +472,62 @@ export default function ResourceReaderClient({
                 )}
 
                 <div className="relative w-full h-[680px] rounded-2xl border border-slate-200 overflow-hidden bg-slate-100 shadow-inner">
-                  {pdfSrc ? (
+                  {pdfSrc &&
+                  (() => {
+                    const formatInfo = getFileFormatDisplay(resource.fileName);
+                    return formatInfo.isPresentation || formatInfo.isWord || formatInfo.isSpreadsheet;
+                  })() ? (
+                    (() => {
+                      const formatInfo = getFileFormatDisplay(resource.fileName);
+                      return (
+                        <div className="w-full h-full flex flex-col items-center justify-center p-8 sm:p-12 text-center bg-white">
+                          <div
+                            className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-4 shadow-sm ${
+                              formatInfo.isPresentation
+                                ? "bg-amber-100 text-amber-700"
+                                : formatInfo.isWord
+                                ? "bg-blue-100 text-blue-700"
+                                : "bg-emerald-100 text-[#00875A]"
+                            }`}
+                          >
+                            {formatInfo.isPresentation ? (
+                              <Presentation className="w-8 h-8" />
+                            ) : (
+                              <FileText className="w-8 h-8" />
+                            )}
+                          </div>
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
+                            {formatInfo.label} • {formatInfo.extension}
+                          </span>
+                          <h4 className="text-xl font-bold text-slate-900 max-w-md mb-2">
+                            {resource.title}
+                          </h4>
+                          <p className="text-xs sm:text-sm text-slate-500 max-w-md mb-6 leading-relaxed">
+                            {resource.fileName || "This file"} is published in native {formatInfo.label} format. Download it directly to your device or open it in your reader.
+                          </p>
+                          <div className="flex flex-wrap items-center justify-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => downloadMaterial(resource, { saveToDevice: true })}
+                              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#00875A] hover:bg-[#00734c] text-white text-xs font-bold shadow-xs cursor-pointer"
+                            >
+                              <Download className="w-4 h-4" />
+                              <span>Download {formatInfo.isPresentation ? "Slides" : "Document"}</span>
+                            </button>
+                            <a
+                              href={pdfSrc}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer"
+                            >
+                              <span>Open File</span>
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  ) : pdfSrc ? (
                     <iframe
                       src={`${pdfSrc}#toolbar=1&view=FitH`}
                       title={resource.title}
@@ -483,7 +540,7 @@ export default function ResourceReaderClient({
                         Not Downloaded for Offline Reading Yet
                       </p>
                       <p className="text-xs text-slate-500 mt-1 max-w-sm">
-                        Connect to the internet and click Download PDF once — it will be stored in your Offline Vault automatically.
+                        Connect to the internet and click Download once — it will be stored in your Offline Vault automatically.
                       </p>
                     </div>
                   ) : (

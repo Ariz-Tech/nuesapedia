@@ -35,9 +35,10 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-export function getSafePdfFilename(material: CourseMaterialItem): string {
-  if (material.fileName && material.fileName.toLowerCase().endsWith(".pdf")) {
-    return material.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+export function getSafeDocumentFilename(material: CourseMaterialItem): string {
+  if (material.fileName) {
+    const safe = material.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    if (safe.includes(".")) return safe;
   }
   const base = `${material.courseCode}_${material.title}`
     .replace(/[^a-zA-Z0-9_-]+/g, "_")
@@ -45,6 +46,8 @@ export function getSafePdfFilename(material: CourseMaterialItem): string {
     .slice(0, 90);
   return `${base || "nuesapedia_resource"}.pdf`;
 }
+
+export const getSafePdfFilename = getSafeDocumentFilename;
 
 function openVaultDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -321,12 +324,8 @@ export async function downloadAndCacheMaterial(
     }
 
     const blob = await fileRes.blob();
-    const pdfBlob =
-      blob.type === "application/pdf"
-        ? blob
-        : new Blob([blob], { type: "application/pdf" });
-
-    const saved = await saveOfflineDocument(material, pdfBlob);
+    const docBlob = blob;
+    const saved = await saveOfflineDocument(material, docBlob);
     if (saveToDevice) {
       triggerBrowserBlobDownload(saved.blob, saved.filename);
     }
@@ -345,7 +344,7 @@ export async function downloadAndCacheMaterial(
       error:
         err instanceof Error
           ? err.message
-          : "Failed to cache PDF for offline study.",
+          : "Failed to download document for offline study.",
     };
   }
 }

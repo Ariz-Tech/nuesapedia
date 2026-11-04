@@ -47,14 +47,22 @@ export function getResourceBadgeStyle(
     };
   }
 
+  if (rawType.includes("slide") || rawType.includes("presentation") || rawType.includes("ppt")) {
+    return {
+      label: "LECTURE SLIDES",
+      className: "bg-[#FEF3C7] text-[#B45309]",
+    };
+  }
+
   if (
     rawType.includes("lecture") ||
     rawType.includes("handout") ||
     rawType.includes("note") ||
+    rawType.includes("doc") ||
     rawType === "pdf"
   ) {
     return {
-      label: "PDF HANDOUT",
+      label: "LECTURE NOTE",
       className: "bg-[#FFE4E6]/60 text-[#E11D48]",
     };
   }

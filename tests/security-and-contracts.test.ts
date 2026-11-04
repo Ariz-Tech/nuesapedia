@@ -448,3 +448,54 @@ test("Mock R2 storage allows unauthenticated GET for reading and downloading res
   assert.equal(body.byteLength, 5);
 });
 
+test("Material categories do not include Textbook, Lab Manual, or Formula Sheet / Summary", async () => {
+  const { MATERIAL_CATEGORIES } = await import("@/lib/constants");
+  assert.ok(!MATERIAL_CATEGORIES.includes("Textbook" as any));
+  assert.ok(!MATERIAL_CATEGORIES.includes("Lab Manual" as any));
+  assert.ok(!MATERIAL_CATEGORIES.includes("Formula Sheet / Summary" as any));
+  assert.ok(MATERIAL_CATEGORIES.includes("Lecture Note"));
+  assert.ok(MATERIAL_CATEGORIES.includes("Past Question"));
+  assert.ok(MATERIAL_CATEGORIES.includes("Video Tutorial"));
+});
+
+test("Videos are categorized as Video Tutorial", async () => {
+  const { MATERIAL_CATEGORIES } = await import("@/lib/constants");
+  assert.equal(MATERIAL_CATEGORIES.includes("Video Tutorial"), true);
+});
+
+test("File utilities recognize and validate documents, slides, and presentations", async () => {
+  const {
+    isAllowedDocumentFilename,
+    getMimeTypeForFilename,
+    verifyDocumentBytes,
+    getFileFormatDisplay,
+  } = await import("@/lib/file-utils");
+
+  assert.equal(isAllowedDocumentFilename("lecture1.pdf"), true);
+  assert.equal(isAllowedDocumentFilename("handout.docx"), true);
+  assert.equal(isAllowedDocumentFilename("handout.doc"), true);
+  assert.equal(isAllowedDocumentFilename("slides.pptx"), true);
+  assert.equal(isAllowedDocumentFilename("presentation.ppt"), true);
+  assert.equal(isAllowedDocumentFilename("notes.txt"), true);
+  assert.equal(isAllowedDocumentFilename("malicious.exe"), false);
+  assert.equal(isAllowedDocumentFilename("script.sh"), false);
+
+  assert.equal(getMimeTypeForFilename("slides.pptx"), "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+  assert.equal(getMimeTypeForFilename("notes.docx"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  assert.equal(getMimeTypeForFilename("handout.pdf"), "application/pdf");
+
+  // PPTX / DOCX Zip signature PK\x03\x04
+  const zipBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
+  assert.equal(verifyDocumentBytes(zipBytes, "slides.pptx").valid, true);
+  assert.equal(verifyDocumentBytes(zipBytes, "notes.docx").valid, true);
+
+  // PDF signature %PDF-
+  const pdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
+  assert.equal(verifyDocumentBytes(pdfBytes, "doc.pdf").valid, true);
+
+  const display = getFileFormatDisplay("week4_lecture.pptx");
+  assert.equal(display.isPresentation, true);
+  assert.equal(display.extension, "PPTX");
+});
+
+

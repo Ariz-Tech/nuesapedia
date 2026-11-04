@@ -10,7 +10,12 @@ interface PageProps {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { id } = await params;
-  const resource = await getResourceById(id);
+  let resource = null;
+  try {
+    resource = await getResourceById(id);
+  } catch (err) {
+    console.warn(`[generateMetadata] Could not fetch resource ${id} from database:`, err);
+  }
 
   if (!resource || resource.status !== "APPROVED") {
     return {
@@ -62,7 +67,12 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function ResourceReaderPage({ params }: PageProps) {
   const { id } = await params;
-  const dbItem = await getResourceById(id);
+  let dbItem = null;
+  try {
+    dbItem = await getResourceById(id);
+  } catch (err) {
+    console.warn(`[ResourceReaderPage] Could not fetch resource ${id} from database:`, err);
+  }
 
   let initialResource: CourseMaterialItem | null = null;
   if (dbItem && dbItem.status === "APPROVED") {

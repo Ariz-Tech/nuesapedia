@@ -3,17 +3,17 @@ export default function ValueProposition() {
     {
       title: "Instant Search & Semester Filter",
       description:
-        "Find any handout, past question, textbook, or lab manual in seconds. Filter by department, level, semester, or course code — zero sign-up required.",
+        "Find any lecture note, past question, summary, or study slide in seconds. Filter by department, level, semester, or course code — zero sign-up required.",
     },
     {
-      title: "All 5 Faculty Departments Covered",
+      title: "All 5 Departments Covered",
       description:
         "Dedicated course materials for Civil, Mechanical, Materials & Metallurgical, Agric & Bio-Resources, and Mining Engineering from 100L through 500L.",
     },
     {
       title: "Offline Study Vault (PWA)",
       description:
-        "Every downloaded PDF is cached directly on your device so you can keep reading handouts and past questions in lecture halls or hostels without internet.",
+        "Every downloaded document is cached directly on your device so you can keep reading handouts, slides, and past questions in lecture halls or hostels without internet.",
     },
   ];
 

@@ -49,8 +49,6 @@ const CATEGORIES = [
   "All Categories",
   "Lecture Note",
   "Past Question",
-  "Textbook",
-  "Lab Manual",
   "Video Tutorial",
 ];
 type SortOption = "newest" | "popular" | "course";
@@ -58,10 +56,8 @@ type SortOption = "newest" | "popular" | "course";
 function normalizeCategoryParam(raw: string | null): string {
   if (!raw) return "All Categories";
   const lower = raw.trim().toLowerCase();
-  if (lower.includes("lecture") || lower.includes("handout")) return "Lecture Note";
+  if (lower.includes("lecture") || lower.includes("handout") || lower.includes("note") || lower.includes("slide")) return "Lecture Note";
   if (lower.includes("past")) return "Past Question";
-  if (lower.includes("textbook") || lower.includes("reference")) return "Textbook";
-  if (lower.includes("lab")) return "Lab Manual";
   if (lower.includes("video")) return "Video Tutorial";
   const exact = CATEGORIES.find((c) => c.toLowerCase() === lower);
   return exact || "All Categories";
@@ -837,7 +833,7 @@ function ResourcesCatalogContent() {
             </h3>
             <p className="text-xs text-slate-500 max-w-sm mx-auto mb-5">
               {selectedMedium === "OFFLINE"
-                ? "Click Download on any PDF handout, textbook, or past question to save it into your offline vault for reading without internet."
+                ? "Click Download on any handout, past question, or document to save it into your offline vault for reading without internet."
                 : hasActiveFilters
                   ? "No materials matched your active filters. Reset filters or request this course material from peers and moderators."
                   : isOffline
@@ -1232,8 +1228,6 @@ function ResourcesCatalogContent() {
                 >
                   <option value="Past Question">Past Question</option>
                   <option value="Lecture Note">Lecture Note / Handout</option>
-                  <option value="Textbook">Textbook / Reference</option>
-                  <option value="Lab Manual">Lab Manual</option>
                   <option value="Video Tutorial">Video Tutorial</option>
                 </select>
               </div>
