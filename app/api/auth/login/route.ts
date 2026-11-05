@@ -8,6 +8,11 @@ import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 import { getReadyDb, isDevMemoryMode, devStore } from "@/lib/db/pool";
 
+// Constant dummy scrypt salt:hash to normalize password hashing execution time
+// on non-existent accounts, preventing timing-based account enumeration attacks.
+const DUMMY_SCRYPT_HASH =
+  "00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+
 export async function POST(req: Request) {
   try {
     const ip = getClientIp(req);
@@ -51,6 +56,8 @@ export async function POST(req: Request) {
 
     const user = await findUserByEmail(normalizedEmail);
     if (!user) {
+      // Execute constant-time dummy password verification to neutralize CPU timing differences
+      await verifyPassword(String(password), DUMMY_SCRYPT_HASH);
       return apiError("INVALID_CREDENTIALS", "Invalid email or password.", 401);
     }
 

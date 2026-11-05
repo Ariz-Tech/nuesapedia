@@ -200,6 +200,19 @@ export async function POST(req: Request) {
       );
     }
 
+    // Prevent storage key and submission reservation flooding by bounding concurrent in-flight sessions
+    const existingUserSubmissions = await getUserSubmissions(session.userId);
+    const activeUploadingCount = existingUserSubmissions.filter(
+      (s) => s.status === "UPLOADING"
+    ).length;
+    if (activeUploadingCount >= 5) {
+      return apiError(
+        "CONCURRENT_UPLOADS_EXCEEDED",
+        "You have too many in-flight upload sessions (max 5). Please complete or cancel existing pending uploads before starting a new one.",
+        429
+      );
+    }
+
     const safeFileName = (fileName ? String(fileName) : "document.pdf")
       .replace(/[^a-zA-Z0-9._-]/g, "_")
       .slice(-120);

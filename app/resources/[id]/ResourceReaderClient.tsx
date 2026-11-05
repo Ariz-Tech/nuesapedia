@@ -531,6 +531,7 @@ export default function ResourceReaderClient({
                     <iframe
                       src={`${pdfSrc}#toolbar=1&view=FitH`}
                       title={resource.title}
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-downloads"
                       className="w-full h-full border-0"
                     />
                   ) : isOffline ? (

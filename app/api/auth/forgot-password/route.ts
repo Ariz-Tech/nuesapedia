@@ -72,24 +72,17 @@ export async function POST(req: Request) {
     const { rawToken, tokenHash } = generateResetToken();
     await createPasswordResetToken(user.id, tokenHash, 15);
 
+    // Canonical application origin for reset links - strictly avoid reflecting untrusted incoming Host headers
     const configuredOrigin =
       process.env.APP_URL?.replace(/\/$/, "") ||
       process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
 
-    let origin = configuredOrigin;
-    if (!origin) {
-      if (process.env.NODE_ENV === "production") {
-        console.warn(
-          "[auth] Warning: APP_URL or NEXT_PUBLIC_APP_URL is not set in production. Falling back to request origin."
-        );
-      }
-      try {
-        const parsed = new URL(req.url);
-        origin = parsed.origin;
-      } catch {
-        origin = "https://nuesapedia.org";
-      }
-    }
+    const origin =
+      configuredOrigin ||
+      (process.env.NODE_ENV === "production"
+        ? "https://nuesalib.com.ng"
+        : "http://localhost:3000");
+
     const resetUrl = `${origin}/forgot-password?token=${encodeURIComponent(rawToken)}`;
 
     const delivery = await sendPasswordResetEmail({
@@ -99,11 +92,11 @@ export async function POST(req: Request) {
     });
 
     if (!delivery.delivered) {
-      return apiError(
-        "EMAIL_DELIVERY_FAILED",
-        "Unable to send reset email right now. Please try again later.",
-        502
+      console.error(
+        `[auth] Password reset delivery failed for ${user.email}: ${delivery.reason || "unknown error"}`
       );
+      // Uniform generic response: never disclose delivery state or account existence
+      return apiSuccess({ message: genericMessage });
     }
 
     return apiSuccess({

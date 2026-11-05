@@ -38,15 +38,14 @@ export async function POST(
     }
 
     const existing = await getResourceById(id);
+    if (!existing) {
+      return apiError("NOT_FOUND", "Resource not found.", 404);
+    }
 
     const report = await createResourceReport({
       resourceId: id,
-      resourceTitle:
-        existing?.title ||
-        (resourceTitle ? String(resourceTitle).trim().slice(0, 200) : "Academic Resource"),
-      courseCode:
-        existing?.courseCode ||
-        (courseCode ? String(courseCode).trim().toUpperCase().slice(0, 20) : "GEN"),
+      resourceTitle: existing.title,
+      courseCode: existing.courseCode,
       reason: reason.trim().slice(0, 120),
       details: details ? String(details).trim().slice(0, 800) : undefined,
     });

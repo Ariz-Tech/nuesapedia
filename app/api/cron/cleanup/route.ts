@@ -1,6 +1,14 @@
+import crypto from "node:crypto";
 import { pruneStaleUploads, getReadyDb, isDevMemoryMode } from "@/lib/db";
 import { deleteR2Object } from "@/lib/r2";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
+
+function safeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 /**
  * GET /api/cron/cleanup
@@ -9,10 +17,22 @@ import { apiError, apiSuccess } from "@/lib/api-helpers";
  */
 export async function GET(req: Request) {
   try {
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && process.env.NODE_ENV === "production") {
-      const authHeader = req.headers.get("authorization");
-      if (authHeader !== `Bearer ${cronSecret}`) {
+    const cronSecret = process.env.CRON_SECRET?.trim();
+    if (process.env.NODE_ENV === "production") {
+      if (!cronSecret) {
+        return apiError(
+          "SERVICE_UNAVAILABLE",
+          "Cron authorization secret is unconfigured in production.",
+          503
+        );
+      }
+      const authHeader = req.headers.get("authorization") || "";
+      if (!safeCompare(authHeader, `Bearer ${cronSecret}`)) {
+        return apiError("UNAUTHORIZED", "Invalid cron authorization.", 401);
+      }
+    } else if (cronSecret) {
+      const authHeader = req.headers.get("authorization") || "";
+      if (!safeCompare(authHeader, `Bearer ${cronSecret}`)) {
         return apiError("UNAUTHORIZED", "Invalid cron authorization.", 401);
       }
     }

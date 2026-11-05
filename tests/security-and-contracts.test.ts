@@ -498,4 +498,49 @@ test("File utilities recognize and validate documents, slides, and presentations
   assert.equal(display.extension, "PPTX");
 });
 
+test("Cron cleanup enforces fail-closed authorization when CRON_SECRET is set", async () => {
+  const { GET: cleanupHandler } = await import("@/app/api/cron/cleanup/route");
+
+  process.env.CRON_SECRET = "super_secure_cron_secret_key_12345";
+
+  // Request without auth header should fail
+  const unauthReq = new Request("http://localhost/api/cron/cleanup");
+  const unauthRes = await cleanupHandler(unauthReq);
+  assert.equal(unauthRes.status, 401);
+
+  // Request with invalid token should fail
+  const badAuthReq = new Request("http://localhost/api/cron/cleanup", {
+    headers: { authorization: "Bearer wrong_secret" },
+  });
+  const badAuthRes = await cleanupHandler(badAuthReq);
+  assert.equal(badAuthRes.status, 401);
+
+  // Request with valid secret should succeed
+  const validReq = new Request("http://localhost/api/cron/cleanup", {
+    headers: { authorization: "Bearer super_secure_cron_secret_key_12345" },
+  });
+  const validRes = await cleanupHandler(validReq);
+  assert.equal(validRes.status, 200);
+
+  delete process.env.CRON_SECRET;
+});
+
+test("Resource reporting rejects non-existent resources with 404", async () => {
+  const { POST: reportHandler } = await import("@/app/api/resources/[id]/report/route");
+
+  const req = new Request("http://localhost/api/resources/non_existent_id/report", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason: "Broken link or corrupted content" }),
+  });
+
+  const res = await reportHandler(req, {
+    params: Promise.resolve({ id: "non_existent_id" }),
+  });
+  assert.equal(res.status, 404);
+  const json = await res.json();
+  assert.equal(json.error?.code, "NOT_FOUND");
+});
+
+
 

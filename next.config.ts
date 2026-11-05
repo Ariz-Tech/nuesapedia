@@ -24,6 +24,19 @@ const nextConfig: NextConfig = {
     ];
   },
   async headers() {
+    const cspDirectives = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https://img.youtube.com https://api.dicebear.com https://res.cloudinary.com https://images.unsplash.com",
+      "font-src 'self' data:",
+      "frame-src 'self' blob: https://www.youtube.com",
+      "connect-src 'self' blob: https://api.dicebear.com https://*.r2.cloudflarestorage.com",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; ");
+
     return [
       {
         source: "/:path*",
@@ -32,6 +45,8 @@ const nextConfig: NextConfig = {
           { key: "X-Frame-Options", value: "SAMEORIGIN" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains; preload" },
+          { key: "Content-Security-Policy", value: cspDirectives },
         ],
       },
       {
