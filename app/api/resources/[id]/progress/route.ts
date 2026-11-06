@@ -1,7 +1,7 @@
 import { getSession } from "@/lib/auth";
 import {
   upsertReadingProgress,
-  getUserReadingProgress,
+  getUserResourceReadingProgress,
 } from "@/lib/db";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 
@@ -16,8 +16,7 @@ export async function GET(
     }
 
     const { id } = await context.params;
-    const allProgress = await getUserReadingProgress(session.userId);
-    const match = allProgress.find((p) => p.resourceId === id) || null;
+    const match = await getUserResourceReadingProgress(session.userId, id);
 
     return apiSuccess({
       progress: match || {

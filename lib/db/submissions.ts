@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { cache } from "react";
-import { COURSE_REGISTRY, resolveCourseMetadata } from "../courses";
+import { resolveCourseMetadata } from "../courses";
 import { parseSizeToBytes } from "../api-helpers";
 import { devStore, getReadyDb, isDevMemoryMode } from "./pool";
 import type {
@@ -65,7 +65,7 @@ export function mapSubmissionRow(row: Record<string, unknown>): DbSubmission {
       : row.sessionYear
         ? String(row.sessionYear)
         : "2025/2026",
-    type: String(row.type ?? "Lecture Notes"),
+    type: String(row.type ?? "Lecture Note"),
     medium,
     description: row.description ? String(row.description) : undefined,
     fileUrl: canonicalFileUrl,
@@ -295,19 +295,29 @@ export async function deleteSubmissionWithChecks(
   }
 
   const db = await getReadyDb();
-  await db.query(`DELETE FROM saved_resources WHERE resource_id = $1`, [submissionId]);
-  await db.query(`DELETE FROM reading_progress WHERE resource_id = $1`, [submissionId]);
-  await db.query(`DELETE FROM resource_reports WHERE resource_id = $1`, [submissionId]);
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM saved_resources WHERE resource_id = $1`, [submissionId]);
+    await client.query(`DELETE FROM reading_progress WHERE resource_id = $1`, [submissionId]);
+    await client.query(`DELETE FROM resource_reports WHERE resource_id = $1`, [submissionId]);
 
-  const res = await db.query(
-    `DELETE FROM submissions WHERE id = $1 RETURNING id`,
-    [submissionId]
-  );
+    const res = await client.query(
+      `DELETE FROM submissions WHERE id = $1 RETURNING id`,
+      [submissionId]
+    );
+    await client.query("COMMIT");
 
-  return {
-    deleted: (res.rowCount ?? 0) > 0,
-    r2Key: existing.r2Key,
-  };
+    return {
+      deleted: (res.rowCount ?? 0) > 0,
+      r2Key: existing.r2Key,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -640,7 +650,13 @@ export async function getApprovedResourcesPaginated(
       items = items.filter((s) => s.courseCode.trim().toLowerCase() === code);
     }
     if (options.type && options.type !== "ALL" && options.type !== "All") {
-      items = items.filter((s) => s.type.toLowerCase() === options.type!.toLowerCase());
+      const targetType = options.type.toLowerCase().trim();
+      items = items.filter(
+        (s) =>
+          s.type.toLowerCase() === targetType ||
+          s.type.toLowerCase().startsWith(targetType) ||
+          targetType.startsWith(s.type.toLowerCase())
+      );
     }
     if (options.medium && options.medium !== "ALL" && options.medium !== "All") {
       items = items.filter((s) => s.medium === options.medium);
@@ -699,7 +715,9 @@ export async function getApprovedResourcesPaginated(
   }
   if (options.type && options.type !== "ALL" && options.type !== "All") {
     params.push(options.type.trim());
-    conditions.push(`type = $${params.length}`);
+    conditions.push(
+      `(LOWER(type) = LOWER($${params.length}) OR LOWER(type) LIKE LOWER($${params.length}) || '%')`
+    );
   }
   if (options.medium && options.medium !== "ALL" && options.medium !== "All") {
     params.push(options.medium.trim().toUpperCase());
@@ -844,4 +862,33 @@ export async function getUserReadingProgress(
     updatedAt:
       row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
   }));
+}
+
+export async function getUserResourceReadingProgress(
+  userId: string,
+  resourceId: string
+): Promise<DbReadingProgress | null> {
+  if (isDevMemoryMode()) {
+    return devStore.readingProgress.get(`${userId}:${resourceId}`) || null;
+  }
+
+  const db = await getReadyDb();
+  const res = await db.query(
+    `SELECT user_id AS "userId", resource_id AS "resourceId", percentage, page, updated_at AS "updatedAt"
+     FROM reading_progress
+     WHERE user_id = $1 AND resource_id = $2
+     LIMIT 1`,
+    [userId, resourceId]
+  );
+
+  if (!res.rows[0]) return null;
+  const row = res.rows[0];
+  return {
+    userId: String(row.userId),
+    resourceId: String(row.resourceId),
+    percentage: Number(row.percentage),
+    page: Number(row.page),
+    updatedAt:
+      row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
+  };
 }

@@ -107,8 +107,22 @@ const PRESET_REJECTION_REASONS = [
 
 export default function ModerationPortalPage() {
   const { user: authUser, loading: authLoading } = useAuth();
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [loadingAuth, setLoadingAuth] = useState(true);
+  const loadingAuth = authLoading;
+  const currentUser: UserProfile | null = useMemo(
+    () =>
+      authUser
+        ? {
+            id: authUser.id,
+            name: authUser.name,
+            email: authUser.email,
+            role: authUser.role || "STUDENT",
+            department: authUser.department,
+            level: authUser.level,
+            avatar: authUser.avatar,
+          }
+        : null,
+    [authUser]
+  );
 
   // Active top portal tab: "queue" | "requests" | "reports" | "users"
   const [activePortalTab, setActivePortalTab] = useState<"queue" | "requests" | "reports" | "users">("queue");
@@ -138,25 +152,6 @@ export default function ModerationPortalPage() {
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [resourceReports, setResourceReports] = useState<ResourceReportItem[]>([]);
   const [reportsLoading, setReportsLoading] = useState(false);
-
-  // Synchronize auth state from AuthContext without duplicate network roundtrip
-  useEffect(() => {
-    if (authLoading) return;
-    if (authUser) {
-      setCurrentUser({
-        id: authUser.id,
-        name: authUser.name,
-        email: authUser.email,
-        role: authUser.role || "STUDENT",
-        department: authUser.department,
-        level: authUser.level,
-        avatar: authUser.avatar,
-      });
-    } else {
-      setCurrentUser(null);
-    }
-    setLoadingAuth(false);
-  }, [authUser, authLoading]);
 
   const fetchSubmissions = useCallback(async () => {
     setQueueLoading(true);

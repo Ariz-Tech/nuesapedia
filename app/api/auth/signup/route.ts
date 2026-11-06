@@ -11,8 +11,9 @@ import { getRandomAvatar } from "@/lib/avatars";
 import { isKnownDepartment } from "@/lib/departments";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { apiError, apiSuccess, validatePassword } from "@/lib/api-helpers";
+import { ACADEMIC_LEVELS } from "@/lib/constants";
 
-const VALID_LEVELS = ["100L", "200L", "300L", "400L", "500L"];
+const VALID_LEVELS = ACADEMIC_LEVELS as readonly string[];
 
 export async function POST(req: Request) {
   try {

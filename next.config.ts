@@ -24,9 +24,10 @@ const nextConfig: NextConfig = {
     ];
   },
   async headers() {
+    const isDev = process.env.NODE_ENV !== "production";
     const cspDirectives = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https://img.youtube.com https://api.dicebear.com https://res.cloudinary.com https://images.unsplash.com",
       "font-src 'self' data:",

@@ -84,7 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_submissions_fts ON submissions USING GIN (
 CREATE TABLE IF NOT EXISTS saved_resources (
   id VARCHAR(50) PRIMARY KEY,
   user_id VARCHAR(50) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  resource_id VARCHAR(100) NOT NULL,
+  resource_id VARCHAR(50) NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
   title VARCHAR(255) NOT NULL,
   course_code VARCHAR(50) NOT NULL,
   department VARCHAR(255) NOT NULL,
@@ -95,19 +95,22 @@ CREATE TABLE IF NOT EXISTS saved_resources (
 );
 
 CREATE INDEX IF NOT EXISTS idx_saved_user ON saved_resources(user_id);
+CREATE INDEX IF NOT EXISTS idx_saved_resource ON saved_resources(resource_id);
 
 CREATE TABLE IF NOT EXISTS reading_progress (
   user_id VARCHAR(50) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  resource_id VARCHAR(100) NOT NULL,
+  resource_id VARCHAR(50) NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
   percentage INTEGER NOT NULL DEFAULT 0,
   page INTEGER NOT NULL DEFAULT 1,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, resource_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_progress_resource ON reading_progress(resource_id);
+
 CREATE TABLE IF NOT EXISTS material_requests (
   id VARCHAR(50) PRIMARY KEY,
-  user_id VARCHAR(50),
+  user_id VARCHAR(50) REFERENCES users(id) ON DELETE SET NULL,
   requester_name VARCHAR(255) NOT NULL,
   course_code VARCHAR(50) NOT NULL,
   department VARCHAR(255) NOT NULL,
@@ -122,7 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_requests_status_created ON material_requests(stat
 
 CREATE TABLE IF NOT EXISTS resource_reports (
   id VARCHAR(50) PRIMARY KEY,
-  resource_id VARCHAR(100) NOT NULL,
+  resource_id VARCHAR(50) NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
   resource_title VARCHAR(255) NOT NULL,
   course_code VARCHAR(50) NOT NULL,
   reason VARCHAR(255) NOT NULL,
@@ -132,4 +135,34 @@ CREATE TABLE IF NOT EXISTS resource_reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_reports_status_created ON resource_reports(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reports_resource ON resource_reports(resource_id);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_saved_resources_submission'
+  ) THEN
+    ALTER TABLE saved_resources
+      ADD CONSTRAINT fk_saved_resources_submission
+      FOREIGN KEY (resource_id) REFERENCES submissions(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_reading_progress_submission'
+  ) THEN
+    ALTER TABLE reading_progress
+      ADD CONSTRAINT fk_reading_progress_submission
+      FOREIGN KEY (resource_id) REFERENCES submissions(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_resource_reports_submission'
+  ) THEN
+    ALTER TABLE resource_reports
+      ADD CONSTRAINT fk_resource_reports_submission
+      FOREIGN KEY (resource_id) REFERENCES submissions(id) ON DELETE CASCADE;
+  END IF;
+EXCEPTION
+  WHEN OTHERS THEN
+    -- Ignore constraint creation errors if existing dirty data is being cleaned
+    NULL;
+END $$;
 

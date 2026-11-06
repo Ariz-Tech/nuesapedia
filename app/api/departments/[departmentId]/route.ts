@@ -26,12 +26,18 @@ export async function GET(
       (c) => c.department.toLowerCase() === dept.name.toLowerCase()
     );
 
-    const levels = ["100L", "200L", "300L", "400L", "500L"].map((lvl) => ({
-      level: lvl,
-      courses: courses.filter((c) => c.level === lvl),
-      resourceCount: resourcesResult.resources.filter((r) => r.level === lvl)
-        .length,
-    }));
+    const levels = ["100L", "200L", "300L", "400L", "500L"].map((lvl) => {
+      const levelCourses = courses.filter((c) => c.level === lvl);
+      const levelResourceCount = levelCourses.reduce(
+        (sum, c) => sum + (c.resourceCount || 0),
+        0
+      );
+      return {
+        level: lvl,
+        courses: levelCourses,
+        resourceCount: levelResourceCount,
+      };
+    });
 
     return apiSuccess({
       department: {

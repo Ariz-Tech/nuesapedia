@@ -73,7 +73,19 @@ export default function ProfilePage() {
   const { user: authUser, loading: authLoading, refresh: refreshAuth, logout: authLogout } = useAuth();
   const { savedCount, offlineCount, offlineTotalBytes } = useSavedResources();
 
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const user: UserProfile | null = authUser
+    ? {
+        id: authUser.id,
+        name: authUser.name,
+        email: authUser.email,
+        department: authUser.department,
+        level: authUser.level,
+        avatar: authUser.avatar,
+        role: authUser.role || "STUDENT",
+        createdAt: authUser.createdAt,
+      }
+    : null;
+
   const [submissions, setSubmissions] = useState<DbSubmission[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>("upload");
   const [loading, setLoading] = useState(true);
@@ -81,10 +93,15 @@ export default function ProfilePage() {
   const [deletingSubId, setDeletingSubId] = useState<string | null>(null);
   const [confirmingSubId, setConfirmingSubId] = useState<string | null>(null);
 
-  // Account settings state
-  const [editName, setEditName] = useState("");
-  const [editDept, setEditDept] = useState<string>(DEPARTMENTS[0]);
-  const [editLevel, setEditLevel] = useState<string>("100L");
+  // Account settings state (with overrides when user types)
+  const [editedName, setEditedName] = useState<string | null>(null);
+  const [editedDept, setEditedDept] = useState<string | null>(null);
+  const [editedLevel, setEditedLevel] = useState<string | null>(null);
+
+  const editName = editedName ?? authUser?.name ?? "";
+  const editDept = editedDept ?? (authUser && isKnownDepartment(authUser.department) ? authUser.department : DEPARTMENTS[0]);
+  const editLevel = editedLevel ?? (authUser && LEVELS.includes(authUser.level) ? authUser.level : "100L");
+
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMsg, setProfileMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
@@ -102,21 +119,6 @@ export default function ProfilePage() {
       router.push("/login?redirect=/profile");
       return;
     }
-
-    const u: UserProfile = {
-      id: authUser.id,
-      name: authUser.name,
-      email: authUser.email,
-      department: authUser.department,
-      level: authUser.level,
-      avatar: authUser.avatar,
-      role: authUser.role || "STUDENT",
-      createdAt: authUser.createdAt,
-    };
-    setUser(u);
-    setEditName(u.name || "");
-    setEditDept(isKnownDepartment(u.department) ? u.department : DEPARTMENTS[0]);
-    setEditLevel(LEVELS.includes(u.level) ? u.level : "100L");
 
     async function loadUploads() {
       try {
@@ -156,7 +158,6 @@ export default function ProfilePage() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        setUser((prev) => (prev ? { ...prev, avatar: newAvatar } : null));
         await refreshAuth();
       }
     } catch (err) {
@@ -190,7 +191,9 @@ export default function ProfilePage() {
         throw new Error(extractApiError(data, "Failed to update profile."));
       }
 
-      setUser(data.user);
+      setEditedName(null);
+      setEditedDept(null);
+      setEditedLevel(null);
       await refreshAuth();
       setProfileMsg({ type: "ok", text: "Academic profile updated." });
     } catch (err: unknown) {
@@ -702,7 +705,7 @@ export default function ProfilePage() {
                         type="text"
                         required
                         value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
+                        onChange={(e) => setEditedName(e.target.value)}
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A]"
                       />
                     </div>
@@ -714,7 +717,7 @@ export default function ProfilePage() {
                         </label>
                         <select
                           value={editDept}
-                          onChange={(e) => setEditDept(e.target.value)}
+                          onChange={(e) => setEditedDept(e.target.value)}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
                         >
                           {DEPARTMENTS.map((dept) => (
@@ -731,7 +734,7 @@ export default function ProfilePage() {
                         </label>
                         <select
                           value={editLevel}
-                          onChange={(e) => setEditLevel(e.target.value)}
+                          onChange={(e) => setEditedLevel(e.target.value)}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
                         >
                           {LEVELS.map((lvl) => (

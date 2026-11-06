@@ -101,7 +101,14 @@ export async function POST(req: Request) {
       youtubeUrl,
     } = body ?? {};
 
-    const effectiveType = medium === "YOUTUBE" ? "Video Tutorial" : String(type || "");
+    const rawType = medium === "YOUTUBE" ? "Video Tutorial" : String(type || "");
+    const normalizedType =
+      rawType.toLowerCase() === "lecture notes"
+        ? "Lecture Note"
+        : rawType.toLowerCase() === "past questions"
+          ? "Past Question"
+          : rawType;
+    const effectiveType = normalizedType;
 
     if (!title || !courseCode || !department || !level || !effectiveType || !medium) {
       return apiError(

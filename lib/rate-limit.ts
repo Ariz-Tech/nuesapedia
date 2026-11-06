@@ -104,15 +104,6 @@ export async function checkRateLimit(
     const resetAt = Math.round(Number(row.reset_ms));
     const retryAfterSeconds = Math.max(1, Math.ceil((resetAt - now) / 1000));
 
-    // Opportunistically prune expired rate-limit records (~2% of requests) to prevent table bloat
-    if (Math.random() < 0.02) {
-      void db
-        .query(
-          `DELETE FROM rate_limits WHERE reset_at < CURRENT_TIMESTAMP - INTERVAL '1 hour'`
-        )
-        .catch(() => {});
-    }
-
     if (count > config.limit) {
       return {
         allowed: false,

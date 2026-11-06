@@ -5,7 +5,6 @@ import {
   updateSubmissionStatus,
   findUserById,
 } from "@/lib/db";
-import { deleteR2Object } from "@/lib/r2";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 
 export async function GET(req: Request) {

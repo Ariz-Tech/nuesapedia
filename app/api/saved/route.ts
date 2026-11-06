@@ -3,6 +3,8 @@ import {
   getSavedResources,
   addSavedResource,
   removeSavedResource,
+  getResourceById,
+  canAccessSubmission,
 } from "@/lib/db";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 
@@ -29,21 +31,26 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { resourceId, title, courseCode, department, type, fileSize } =
-      body ?? {};
+    const { resourceId } = body ?? {};
 
-    if (!resourceId || !title || !courseCode || !department || !type) {
-      return apiError("VALIDATION_ERROR", "Missing resource metadata.", 400);
+    if (!resourceId || typeof resourceId !== "string") {
+      return apiError("VALIDATION_ERROR", "resourceId is required.", 400);
+    }
+
+    const cleanResourceId = resourceId.trim();
+    const existing = await getResourceById(cleanResourceId);
+    if (!existing || !canAccessSubmission(existing, session)) {
+      return apiError("NOT_FOUND", "Resource not found or unavailable.", 404);
     }
 
     const item = await addSavedResource({
       userId: session.userId,
-      resourceId: String(resourceId),
-      title: String(title).slice(0, 255),
-      courseCode: String(courseCode).slice(0, 50),
-      department: String(department).slice(0, 255),
-      type: String(type).slice(0, 100),
-      fileSize: fileSize ? String(fileSize).slice(0, 50) : "PDF Document",
+      resourceId: existing.id,
+      title: existing.title,
+      courseCode: existing.courseCode,
+      department: existing.department,
+      type: existing.type,
+      fileSize: existing.fileSize || "PDF Document",
     });
 
     return apiSuccess({ saved: item }, 201);

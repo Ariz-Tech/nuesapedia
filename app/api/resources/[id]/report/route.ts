@@ -27,7 +27,7 @@ export async function POST(
 
     const { id } = await context.params;
     const body = await req.json();
-    const { resourceTitle, courseCode, reason, details } = body ?? {};
+    const { reason, details } = body ?? {};
 
     if (!reason || typeof reason !== "string" || !reason.trim()) {
       return apiError(

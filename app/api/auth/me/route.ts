@@ -2,8 +2,9 @@ import { getSession } from "@/lib/auth";
 import { findUserById, updateUser } from "@/lib/db";
 import { isKnownDepartment } from "@/lib/departments";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
+import { ACADEMIC_LEVELS } from "@/lib/constants";
 
-const VALID_LEVELS = ["100L", "200L", "300L", "400L", "500L"];
+const VALID_LEVELS = ACADEMIC_LEVELS as readonly string[];
 
 export async function GET() {
   try {

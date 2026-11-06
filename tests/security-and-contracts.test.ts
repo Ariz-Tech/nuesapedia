@@ -450,9 +450,10 @@ test("Mock R2 storage allows unauthenticated GET for reading and downloading res
 
 test("Material categories do not include Textbook, Lab Manual, or Formula Sheet / Summary", async () => {
   const { MATERIAL_CATEGORIES } = await import("@/lib/constants");
-  assert.ok(!MATERIAL_CATEGORIES.includes("Textbook" as any));
-  assert.ok(!MATERIAL_CATEGORIES.includes("Lab Manual" as any));
-  assert.ok(!MATERIAL_CATEGORIES.includes("Formula Sheet / Summary" as any));
+  const categoriesList = MATERIAL_CATEGORIES as readonly string[];
+  assert.ok(!categoriesList.includes("Textbook"));
+  assert.ok(!categoriesList.includes("Lab Manual"));
+  assert.ok(!categoriesList.includes("Formula Sheet / Summary"));
   assert.ok(MATERIAL_CATEGORIES.includes("Lecture Note"));
   assert.ok(MATERIAL_CATEGORIES.includes("Past Question"));
   assert.ok(MATERIAL_CATEGORIES.includes("Video Tutorial"));

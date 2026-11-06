@@ -71,7 +71,7 @@ Client callers use `extractApiError(data, fallback)` in `lib/api-helpers.ts` to 
 | `POST` | `/api/uploads` | Session | Registers a `YOUTUBE` (`PENDING_REVIEW`) or `PDF` (`UPLOADING`) submission and returns pre-signed R2 PUT URL. |
 | `POST` | `/api/uploads/:id/complete` | Owner / Mod | Verifies R2 object existence, `<= 30MB` byte size, and `%PDF-` magic header via `HeadObject` + range read before promoting `UPLOADING -> PENDING_REVIEW`. |
 | `DELETE` | `/api/uploads?id=...` | Owner (if unapproved) / Mod | Withdraws a pending/rejected submission and deletes its R2 object. |
-| `GET` / `PATCH` | `/api/moderation` | `MODERATOR` / `ADMIN` | Lists submissions (`status`, `limit`, `offset`) and approves or rejects submissions (deleting rejected R2 objects). |
+| `GET` / `PATCH` | `/api/moderation` | `MODERATOR` / `ADMIN` | Lists submissions (`status`, `limit`, `offset`) and approves or rejects submissions with feedback reason (retaining storage records for audit/appeals). |
 | `GET` / `PATCH` | `/api/moderation/reports` | `MODERATOR` / `ADMIN` | Lists and resolves flagged resource reports. |
 | `GET` / `PATCH` | `/api/requests` | `MODERATOR` / `ADMIN` | Lists and marks student material requests as `OPEN` or `FULFILLED`. |
 | `GET` / `PATCH` | `/api/admin/users` | `ADMIN` | Lists users (`limit`, `offset`) and updates RBAC roles (incrementing `session_version` to revoke stale privileges immediately). |

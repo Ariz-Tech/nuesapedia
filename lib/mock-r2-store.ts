@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 
@@ -14,15 +15,23 @@ export interface MockStoredPdf {
 export type MockStoredFile = MockStoredPdf;
 
 function getStorageDir(): string {
-  const dir = path.join(process.cwd(), "node_modules", ".cache", "mock-r2");
+  const preferred = path.join(process.cwd(), "node_modules", ".cache", "mock-r2");
   try {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(preferred)) {
+      fs.mkdirSync(preferred, { recursive: true });
     }
+    return preferred;
   } catch {
-    // ignore
+    const fallback = path.join(os.tmpdir(), "nuesapedia-mock-r2");
+    try {
+      if (!fs.existsSync(fallback)) {
+        fs.mkdirSync(fallback, { recursive: true });
+      }
+      return fallback;
+    } catch {
+      return preferred;
+    }
   }
-  return dir;
 }
 
 function keyToHash(key: string): string {
@@ -146,8 +155,10 @@ class PersistentMockR2Store {
       const binPath = path.join(this.dir, `${hash}.bin`);
       const metaPath = path.join(this.dir, `${hash}.json`);
 
-      fs.writeFileSync(binPath, Buffer.from(item.bytes));
-      fs.writeFileSync(
+      fs.writeFile(binPath, Buffer.from(item.bytes), (err) => {
+        if (err) console.warn("[mockR2Store] Failed to write binary file:", err);
+      });
+      fs.writeFile(
         metaPath,
         JSON.stringify({
           sizeBytes: item.sizeBytes,
@@ -156,7 +167,10 @@ class PersistentMockR2Store {
           contentType: item.contentType,
           fileName: item.fileName,
         }),
-        "utf-8"
+        "utf-8",
+        (err) => {
+          if (err) console.warn("[mockR2Store] Failed to write metadata file:", err);
+        }
       );
     } catch (e) {
       console.warn("[mockR2Store] Failed to persist to disk:", e);
@@ -175,8 +189,8 @@ class PersistentMockR2Store {
       const hash = keyToHash(key);
       const binPath = path.join(this.dir, `${hash}.bin`);
       const metaPath = path.join(this.dir, `${hash}.json`);
-      if (fs.existsSync(binPath)) fs.unlinkSync(binPath);
-      if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath);
+      fs.unlink(binPath, () => {});
+      fs.unlink(metaPath, () => {});
     } catch {
       // ignore
     }
