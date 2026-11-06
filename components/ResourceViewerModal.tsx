@@ -34,6 +34,7 @@ import { getResourceBadgeStyle } from "@/lib/badge-styles";
 import { resolveCourseMetadata } from "@/lib/courses";
 import { extractApiError } from "@/lib/api-helpers";
 import { getFileFormatDisplay } from "@/lib/file-utils";
+import { useTrackedBlobUrl } from "@/lib/hooks/useTrackedBlobUrl";
 
 interface ResourceViewerModalProps {
   material: CourseMaterialItem | null;
@@ -68,6 +69,7 @@ function ResourceViewerModalOpen({
     useSavedResources();
 
   const dialogRef = useRef<HTMLDivElement>(null);
+  const { createTrackedUrl, revokeTrackedUrl } = useTrackedBlobUrl();
   const [offlineBlobUrl, setOfflineBlobUrl] = useState<string | null>(null);
   const [checkingOffline, setCheckingOffline] = useState<boolean>(
     material.medium !== "YOUTUBE"
@@ -124,7 +126,7 @@ function ResourceViewerModalOpen({
   // Load cached PDF Blob from IndexedDB & existing reading progress (honest tracking)
   useEffect(() => {
     let active = true;
-    let createdObjectUrl: string | null = null;
+    let localUrl: string | null = null;
     let studyTimer: number | undefined;
 
     (async () => {
@@ -142,8 +144,8 @@ function ResourceViewerModalOpen({
         const record = await getOfflineDocument(canonicalId);
         if (!active) return;
         if (record && record.blob && record.blob.size > 0) {
-          createdObjectUrl = URL.createObjectURL(record.blob);
-          setOfflineBlobUrl(createdObjectUrl);
+          localUrl = createTrackedUrl(record.blob);
+          setOfflineBlobUrl(localUrl);
         } else {
           setOfflineBlobUrl(null);
         }
@@ -167,11 +169,11 @@ function ResourceViewerModalOpen({
     return () => {
       active = false;
       if (studyTimer) window.clearTimeout(studyTimer);
-      if (createdObjectUrl) {
-        URL.revokeObjectURL(createdObjectUrl);
+      if (localUrl) {
+        revokeTrackedUrl(localUrl);
       }
     };
-  }, [canonicalId, isVideo, isOffline]);
+  }, [canonicalId, isVideo, isOffline, createTrackedUrl, revokeTrackedUrl]);
 
   const videoId =
     extractYoutubeId(material.youtubeVideoId) ||
@@ -365,7 +367,7 @@ function ResourceViewerModalOpen({
                   if (res.ok && !offlineBlobUrl) {
                     const rec = await getOfflineDocument(canonicalId);
                     if (rec?.blob) {
-                      setOfflineBlobUrl(URL.createObjectURL(rec.blob));
+                      setOfflineBlobUrl(createTrackedUrl(rec.blob));
                     }
                   }
                 }}

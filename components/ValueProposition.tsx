@@ -3,7 +3,7 @@ export default function ValueProposition() {
     {
       title: "Instant Search & Semester Filter",
       description:
-        "Find any lecture note, past question, summary, or study slide in seconds. Filter by department, level, semester, or course code — zero sign-up required.",
+        "Find any lecture note, past question, or study slide in seconds. Filter by department, level, semester, or course code — zero sign-up required.",
     },
     {
       title: "All 5 Departments Covered",
@@ -32,9 +32,9 @@ export default function ValueProposition() {
 
         {/* Feature Cards Grid */}
         <div className="mt-8 md:mt-10 grid grid-cols-1 md:grid-cols-3 gap-6">
-          {features.map((item, idx) => (
+          {features.map((item) => (
             <div
-              key={idx}
+              key={item.title}
               className="bg-[#F8FAFC] border border-slate-200/80 rounded-2xl p-6 sm:p-7 hover:border-slate-300 transition-all hover:shadow-[0_4px_12px_rgba(0,0,0,0.03)] flex flex-col justify-between"
             >
               <div>

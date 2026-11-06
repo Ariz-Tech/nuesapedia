@@ -4,6 +4,19 @@ export type AcademicLevel = (typeof ACADEMIC_LEVELS)[number];
 export const SEMESTERS = ["First Semester", "Second Semester"] as const;
 export type SemesterName = (typeof SEMESTERS)[number];
 
+export const ACADEMIC_SESSIONS = [
+  "2025/2026",
+  "2024/2025",
+  "2023/2024",
+  "2022/2023",
+  "2021/2022",
+  "Older",
+] as const;
+export type AcademicSession = (typeof ACADEMIC_SESSIONS)[number];
+
+export const USER_ROLES = ["STUDENT", "MODERATOR", "ADMIN"] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
 export const SUBMISSION_MEDIUMS = ["PDF", "YOUTUBE"] as const;
 export type SubmissionMedium = (typeof SUBMISSION_MEDIUMS)[number];
 
@@ -21,6 +34,28 @@ export const MATERIAL_CATEGORIES = [
   "Video Tutorial",
 ] as const;
 export type MaterialCategory = (typeof MATERIAL_CATEGORIES)[number];
+
+export const PDF_CATEGORIES = [
+  "Lecture Note",
+  "Past Question",
+] as const;
+
+export const VIDEO_CATEGORY = "Video Tutorial" as const;
+
+export const CATALOG_FILTER_LEVELS = [
+  "All Levels",
+  ...ACADEMIC_LEVELS,
+] as const;
+
+export const CATALOG_FILTER_SEMESTERS = [
+  "All Semesters",
+  ...SEMESTERS,
+] as const;
+
+export const CATALOG_FILTER_CATEGORIES = [
+  "All Categories",
+  ...MATERIAL_CATEGORIES,
+] as const;
 
 export const PAGINATION = {
   DEFAULT_PAGE: 1,
@@ -40,4 +75,5 @@ export const LIMITS = {
   PASSWORD_MIN_LENGTH: 8,
   PASSWORD_MAX_LENGTH: 128,
 } as const;
+
 
