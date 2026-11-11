@@ -27,75 +27,13 @@ import { DEPARTMENTS } from "@/lib/departments";
 import { extractApiError } from "@/lib/api-helpers";
 import YoutubeIcon from "@/components/icons/YoutubeIcon";
 import { useAuth } from "@/context/AuthContext";
-
-interface UserProfile {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  department: string;
-  level: string;
-  avatar: string;
-}
-
-interface SubmissionItem {
-  id: string;
-  userId: string;
-  title: string;
-  courseCode: string;
-  department: string;
-  level: string;
-  semester: string;
-  type: string;
-  medium: "PDF" | "YOUTUBE";
-  description?: string;
-  fileUrl?: string;
-  fileName?: string;
-  fileSize?: string;
-  cloudinaryPublicId?: string;
-  youtubeUrl?: string;
-  youtubeVideoId?: string;
-  thumbnailUrl?: string;
-  status: "PENDING_REVIEW" | "APPROVED" | "REJECTED";
-  rejectionReason?: string;
-  reviewedAt?: string;
-  reviewedBy?: string;
-  createdAt: string;
-}
-
-interface UserDirectoryItem {
-  id: string;
-  name: string;
-  email: string;
-  department: string;
-  level: string;
-  avatar: string;
-  role: string;
-  createdAt: string;
-}
-
-interface MaterialRequestItem {
-  id: string;
-  requesterName?: string;
-  courseCode: string;
-  department: string;
-  level: string;
-  type: string;
-  details?: string;
-  status: "OPEN" | "FULFILLED";
-  createdAt: string;
-}
-
-interface ResourceReportItem {
-  id: string;
-  resourceId: string;
-  resourceTitle: string;
-  courseCode: string;
-  reason: string;
-  details?: string;
-  status: "OPEN" | "RESOLVED";
-  createdAt: string;
-}
+import type {
+  UserProfile,
+  SubmissionItem,
+  UserDirectoryItem,
+  MaterialRequestItem,
+  ResourceReportItem,
+} from "./types";
 
 const PRESET_REJECTION_REASONS = [
   "Incomplete notes or missing key chapters.",
