@@ -126,3 +126,56 @@ export interface PaginatedResourcesResult {
   totalPages: number;
 }
 
+/**
+ * Client-safe projection of a submission for public catalog endpoints.
+ * Explicitly allowlisted so internal fields (r2Key, uploader userId, reviewer
+ * identity, rejection reason, storage public id) are never serialized to clients.
+ */
+export interface PublicResource {
+  id: string;
+  title: string;
+  courseCode: string;
+  department: string;
+  level: string;
+  semester: string;
+  sessionYear?: string;
+  type: string;
+  medium: "PDF" | "YOUTUBE";
+  description?: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: string;
+  fileSizeBytes?: number | null;
+  youtubeUrl?: string;
+  youtubeVideoId?: string;
+  thumbnailUrl?: string;
+  status: SubmissionStatus;
+  downloads?: number;
+  createdAt: string;
+}
+
+export function toPublicResource(submission: DbSubmission): PublicResource {
+  return {
+    id: submission.id,
+    title: submission.title,
+    courseCode: submission.courseCode,
+    department: submission.department,
+    level: submission.level,
+    semester: submission.semester,
+    sessionYear: submission.sessionYear,
+    type: submission.type,
+    medium: submission.medium,
+    description: submission.description,
+    fileUrl: submission.fileUrl,
+    fileName: submission.fileName,
+    fileSize: submission.fileSize,
+    fileSizeBytes: submission.fileSizeBytes,
+    youtubeUrl: submission.youtubeUrl,
+    youtubeVideoId: submission.youtubeVideoId,
+    thumbnailUrl: submission.thumbnailUrl,
+    status: submission.status,
+    downloads: submission.downloads,
+    createdAt: submission.createdAt,
+  };
+}
+

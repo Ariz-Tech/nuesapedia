@@ -40,6 +40,12 @@ export async function POST(req: Request) {
       );
     }
 
+    // Bound the password length before the deliberately expensive scrypt hash to
+    // avoid a CPU-exhaustion vector from arbitrarily large request bodies.
+    if (typeof password !== "string" || password.length > 128) {
+      return apiError("INVALID_CREDENTIALS", "Invalid email or password.", 401);
+    }
+
     const normalizedEmail = String(email).trim().toLowerCase();
     const emailRate = await checkRateLimit(`login:email:${normalizedEmail}`, {
       limit: 8,

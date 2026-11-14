@@ -45,7 +45,7 @@ export async function PATCH(req: Request) {
       return apiError(
         "FORBIDDEN",
         "You cannot revoke your own ADMIN privileges.",
-        400
+        403
       );
     }
 

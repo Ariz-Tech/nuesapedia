@@ -303,10 +303,15 @@ export default function ResourceReaderClient({
                 disabled={isDownloading}
                 onClick={async () => {
                   const res = await downloadMaterial(resource, { saveToDevice: true });
-                  if (res.ok && !offlineBlobUrl) {
+                  if (res.ok) {
                     const rec = await getOfflineDocument(canonicalId);
                     if (rec?.blob) {
-                      setOfflineBlobUrl(URL.createObjectURL(rec.blob));
+                      const previousUrl = offlineBlobUrl;
+                      const nextUrl = URL.createObjectURL(rec.blob);
+                      setOfflineBlobUrl(nextUrl);
+                      if (previousUrl && previousUrl !== nextUrl) {
+                        URL.revokeObjectURL(previousUrl);
+                      }
                     }
                   }
                 }}

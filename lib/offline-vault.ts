@@ -2,6 +2,10 @@
 
 import type { CourseMaterialItem } from "./saved-client";
 import { getMaterialDownloadUrl, isVideoMaterial } from "./saved-client";
+import { formatBytes } from "./format";
+
+// Re-exported from the shared formatter so client and server output stay in sync.
+export { formatBytes };
 
 const DB_NAME = "nuesapedia_offline_db";
 const DB_VERSION = 2;
@@ -26,13 +30,6 @@ export interface ReadingProgressRecord {
   percentage: number;
   page: number;
   updatedAt: string;
-}
-
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 export function getSafeDocumentFilename(material: CourseMaterialItem): string {

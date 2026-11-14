@@ -20,7 +20,7 @@ function cleanCredential(val: string | undefined): string {
 const R2_ACCOUNT_ID = cleanCredential(process.env.R2_ACCOUNT_ID);
 const R2_ACCESS_KEY_ID = cleanCredential(process.env.R2_ACCESS_KEY_ID);
 const R2_SECRET_ACCESS_KEY = cleanCredential(process.env.R2_SECRET_ACCESS_KEY);
-export const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || "nuesapedia-resources";
+export const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || "nuesapedia-storage";
 export const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || "";
 
 export const MAX_PDF_UPLOAD_BYTES = 30 * 1024 * 1024; // 30 MB

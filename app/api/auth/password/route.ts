@@ -55,6 +55,14 @@ export async function PATCH(req: Request) {
       return apiError("NOT_FOUND", "User account not found.", 404);
     }
 
+    if (typeof currentPassword !== "string" || currentPassword.length > 128) {
+      return apiError(
+        "INVALID_CREDENTIALS",
+        "Your current password is incorrect.",
+        401
+      );
+    }
+
     const valid = await verifyPassword(String(currentPassword), user.password);
     if (!valid) {
       return apiError(

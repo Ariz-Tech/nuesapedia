@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { formatBytes as formatBytesCore } from "./format";
 
 export interface ApiErrorDetail {
   code: string;
@@ -124,13 +125,12 @@ export function getSafeRedirectPath(
   }
 }
 
+/**
+ * API-facing byte formatter: unknown or zero sizes render as "PDF Document".
+ * Delegates to the shared canonical implementation in `./format`.
+ */
 export function formatBytes(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined || !Number.isFinite(bytes) || bytes <= 0) {
-    return "PDF Document";
-  }
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  return formatBytesCore(bytes, "PDF Document");
 }
 
 export function parseSizeToBytes(sizeStr: string | null | undefined): number | null {

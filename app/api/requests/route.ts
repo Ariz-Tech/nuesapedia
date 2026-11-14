@@ -6,6 +6,7 @@ import {
   findUserById,
 } from "@/lib/db";
 import { isKnownDepartment } from "@/lib/departments";
+import { isAcademicLevel } from "@/lib/constants";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 
@@ -68,6 +69,10 @@ export async function POST(req: Request) {
 
     if (!isKnownDepartment(department)) {
       return apiError("VALIDATION_ERROR", "Invalid engineering department.", 400);
+    }
+
+    if (!isAcademicLevel(String(level))) {
+      return apiError("VALIDATION_ERROR", "Invalid academic level (100L - 500L).", 400);
     }
 
     const created = await createMaterialRequest({

@@ -35,6 +35,52 @@ export const MATERIAL_CATEGORIES = [
 ] as const;
 export type MaterialCategory = (typeof MATERIAL_CATEGORIES)[number];
 
+/**
+ * Canonical set of accepted material `type` values for uploads and edits.
+ * Uploads normalize plural variants ("Lecture Notes"/"Past Questions") to their
+ * singular canonical form before persisting, so stored values are always canonical.
+ */
+export const MATERIAL_TYPES = [
+  "Lecture Note",
+  "Lecture Notes",
+  "Past Question",
+  "Past Questions",
+  "Tutorial / Problem Set",
+  "Full Lecture Recording",
+  "Concept / Topic Explainer",
+  "Past Question Solution Walkthrough",
+  "Software / CAD / Simulation Tutorial",
+  "Video Tutorial",
+] as const;
+export type MaterialType = (typeof MATERIAL_TYPES)[number];
+
+export const MEDIUMS = ["PDF", "YOUTUBE"] as const;
+export type MediumName = (typeof MEDIUMS)[number];
+
+export function isAcademicLevel(value: unknown): value is AcademicLevel {
+  return (
+    typeof value === "string" &&
+    (ACADEMIC_LEVELS as readonly string[]).includes(value)
+  );
+}
+
+export function isSemesterName(value: unknown): value is SemesterName {
+  return (
+    typeof value === "string" && (SEMESTERS as readonly string[]).includes(value)
+  );
+}
+
+export function isMaterialType(value: unknown): value is MaterialType {
+  return (
+    typeof value === "string" &&
+    (MATERIAL_TYPES as readonly string[]).includes(value)
+  );
+}
+
+export function isMedium(value: unknown): value is MediumName {
+  return typeof value === "string" && (MEDIUMS as readonly string[]).includes(value);
+}
+
 export const PDF_CATEGORIES = [
   "Lecture Note",
   "Past Question",

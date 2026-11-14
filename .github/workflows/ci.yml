@@ -9,6 +9,28 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nuesapedia_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Points the migration step and the production build at the CI Postgres.
+      # The unit tests delete DATABASE_URL themselves to run in isolated in-memory mode.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/nuesapedia_test
+      SESSION_SECRET: ci-only-high-entropy-session-secret-key-minimum-32-chars!!
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,6 +50,11 @@ jobs:
       - name: ESLint check
         run: npm run lint
 
+      - name: Apply database migrations
+        run: npm run db:migrate
+
       - name: Security & contract unit tests
         run: npm test
 
+      - name: Production build
+        run: npm run build

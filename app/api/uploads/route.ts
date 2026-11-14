@@ -26,22 +26,18 @@ import {
   getMimeTypeForFilename,
   getFileFormatDisplay,
 } from "@/lib/file-utils";
+import {
+  ACADEMIC_LEVELS,
+  MATERIAL_TYPES,
+  MEDIUMS,
+  SEMESTERS,
+} from "@/lib/constants";
 
-const VALID_LEVELS = ["100L", "200L", "300L", "400L", "500L"];
-const VALID_SEMESTERS = ["First Semester", "Second Semester"];
-const VALID_MEDIUMS = ["PDF", "YOUTUBE"] as const;
-const VALID_MATERIAL_TYPES = [
-  "Lecture Note",
-  "Lecture Notes",
-  "Past Question",
-  "Past Questions",
-  "Tutorial / Problem Set",
-  "Full Lecture Recording",
-  "Concept / Topic Explainer",
-  "Past Question Solution Walkthrough",
-  "Software / CAD / Simulation Tutorial",
-  "Video Tutorial",
-];
+// Single source of truth for enum validation lives in lib/constants.ts.
+const VALID_LEVELS: readonly string[] = ACADEMIC_LEVELS;
+const VALID_SEMESTERS: readonly string[] = SEMESTERS;
+const VALID_MEDIUMS: readonly string[] = MEDIUMS;
+const VALID_MATERIAL_TYPES: readonly string[] = MATERIAL_TYPES;
 
 export async function GET() {
   try {

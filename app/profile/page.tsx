@@ -114,6 +114,7 @@ export default function ProfilePage() {
   useEffect(() => {
     if (authLoading) return;
     let active = true;
+    const controller = new AbortController();
 
     if (!authUser) {
       router.push("/login?redirect=/profile");
@@ -122,7 +123,10 @@ export default function ProfilePage() {
 
     async function loadUploads() {
       try {
-        const subRes = await fetch("/api/uploads", { cache: "no-store" });
+        const subRes = await fetch("/api/uploads", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
         if (subRes.ok) {
           const subData = await subRes.json().catch(() => null);
           if (active && subData?.success) {
@@ -130,6 +134,7 @@ export default function ProfilePage() {
           }
         }
       } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
         console.error("Failed to load user uploads:", err);
       } finally {
         if (active) {
@@ -141,6 +146,7 @@ export default function ProfilePage() {
     void loadUploads();
     return () => {
       active = false;
+      controller.abort();
     };
   }, [authUser, authLoading, router]);
 

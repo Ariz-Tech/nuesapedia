@@ -11,7 +11,8 @@ export async function sendPasswordResetEmail(params: {
 }): Promise<SendResetEmailResult> {
   const resendApiKey = process.env.RESEND_API_KEY?.trim();
   const fromEmail =
-    process.env.EMAIL_FROM?.trim() || "NUESApedia <noreply@nuesapedia.org>";
+    process.env.EMAIL_FROM?.trim() ||
+    "NUESApedia <noreply@nuesapedia.fuoye.edu.ng>";
 
   if (!resendApiKey) {
     if (process.env.NODE_ENV !== "production") {

@@ -80,8 +80,8 @@ export default function RecentResources({
   const [loading, setLoading] = useState(!hasInitial);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchLatest = useCallback(async () => {
-    const res = await fetch("/api/resources?limit=4");
+  const fetchLatest = useCallback(async (signal?: AbortSignal) => {
+    const res = await fetch("/api/resources?limit=4", { signal });
     if (!res.ok) throw new Error("Could not load recent resources");
     const data = await res.json();
     return data?.success && Array.isArray(data.resources)
@@ -105,12 +105,14 @@ export default function RecentResources({
   useEffect(() => {
     if (hasInitial) return;
     let active = true;
+    const controller = new AbortController();
 
     (async () => {
       try {
-        const items = await fetchLatest();
+        const items = await fetchLatest(controller.signal);
         if (active) setResources(items);
-      } catch {
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
         if (active) {
           setError("Unable to load latest resources. Please check your connection.");
         }
@@ -121,6 +123,7 @@ export default function RecentResources({
 
     return () => {
       active = false;
+      controller.abort();
     };
   }, [hasInitial, fetchLatest]);
 

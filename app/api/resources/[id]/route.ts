@@ -4,7 +4,14 @@ import {
   updateSubmission,
   deleteSubmissionWithChecks,
   canAccessSubmission,
+  toPublicResource,
 } from "@/lib/db";
+import { isKnownDepartment } from "@/lib/departments";
+import {
+  isAcademicLevel,
+  isMaterialType,
+  isSemesterName,
+} from "@/lib/constants";
 import { deleteR2Object } from "@/lib/r2";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 
@@ -29,7 +36,17 @@ export async function GET(
       return apiError("NOT_FOUND", "Resource not found.", 404);
     }
 
-    return apiSuccess({ resource });
+    // Only the uploader and staff may see internal fields (uploader id, storage key,
+    // reviewer identity, rejection reason). Everyone else receives a safe projection.
+    const canSeeInternal =
+      !!session &&
+      (session.userId === resource.userId ||
+        session.role === "ADMIN" ||
+        session.role === "MODERATOR");
+
+    return apiSuccess({
+      resource: canSeeInternal ? resource : toPublicResource(resource),
+    });
   } catch (error) {
     console.error("GET /api/resources/[id] error:", error);
     return apiError("INTERNAL_ERROR", "Failed to load resource details.", 500);
@@ -81,6 +98,21 @@ export async function PATCH(
       type,
       description,
     } = body ?? {};
+
+    // Validate enum fields before persisting so edits cannot introduce values
+    // the upload flow would have rejected.
+    if (department && !isKnownDepartment(String(department))) {
+      return apiError("VALIDATION_ERROR", "Invalid engineering department.", 400);
+    }
+    if (level && !isAcademicLevel(String(level))) {
+      return apiError("VALIDATION_ERROR", "Invalid academic level (100L - 500L).", 400);
+    }
+    if (semester && !isSemesterName(String(semester))) {
+      return apiError("VALIDATION_ERROR", "Invalid semester.", 400);
+    }
+    if (type && !isMaterialType(String(type))) {
+      return apiError("VALIDATION_ERROR", "Invalid material type.", 400);
+    }
 
     const updated = await updateSubmission(id, {
       title: title ? String(title).trim().slice(0, 200) : undefined,

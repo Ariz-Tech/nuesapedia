@@ -119,7 +119,16 @@ export async function checkRateLimit(
       resetAt,
       retryAfterSeconds,
     };
-  } catch {
+  } catch (error) {
+    // Intentionally fail-OPEN: if the shared PostgreSQL limiter is unreachable we
+    // degrade to a per-process in-memory limiter so a DB blip cannot lock everyone out
+    // of auth-critical endpoints. This degradation MUST be observable — a silent
+    // fallback lets an attacker spread requests across serverless isolates to multiply
+    // the effective limit. Emitting a warning here makes that visible in logs/alerting.
+    console.warn(
+      "[rate-limit] PostgreSQL limiter unavailable; degrading to per-instance in-memory mode.",
+      error instanceof Error ? error.message : error
+    );
     return checkMemoryRateLimit(key, config);
   }
 }

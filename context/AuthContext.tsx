@@ -6,6 +6,7 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useMemo,
   useRef,
 } from "react";
 import { clearUserSavedCache } from "@/lib/saved-client";
@@ -106,8 +107,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [fetchMe]);
 
+  const contextValue = useMemo(
+    () => ({ user, loading, refresh, logout }),
+    [user, loading, refresh, logout]
+  );
+
   return (
-    <AuthContext.Provider value={{ user, loading, refresh, logout }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

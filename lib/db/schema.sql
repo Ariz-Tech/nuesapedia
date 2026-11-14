@@ -160,9 +160,5 @@ BEGIN
       ADD CONSTRAINT fk_resource_reports_submission
       FOREIGN KEY (resource_id) REFERENCES submissions(id) ON DELETE CASCADE;
   END IF;
-EXCEPTION
-  WHEN OTHERS THEN
-    -- Ignore constraint creation errors if existing dirty data is being cleaned
-    NULL;
 END $$;
 

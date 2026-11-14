@@ -1,8 +1,7 @@
 import crypto from "node:crypto";
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { findUserById, isConfiguredAdminEmail } from "./db/users";
-import { getReadyDb, isDevMemoryMode, devStore } from "./db/pool";
+import { findUserById } from "./db/users";
 
 export const SESSION_COOKIE_NAME = "nuesapedia_session";
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -146,26 +145,6 @@ export function hashResetToken(rawToken: string): string {
 }
 
 /**
- * Syncs `ADMIN_EMAILS` bootstrap role into persistent storage without bumping `session_version`,
- * ensuring `/api/auth/me` and `getSession()` never disagree on role.
- */
-async function ensureBootstrapAdminRole(userId: string, email: string, currentRole: string): Promise<string> {
-  if (!isConfiguredAdminEmail(email) || currentRole === "ADMIN") {
-    return currentRole;
-  }
-
-  if (isDevMemoryMode()) {
-    const u = devStore.users.get(email.trim().toLowerCase());
-    if (u) u.role = "ADMIN";
-    return "ADMIN";
-  }
-
-  const db = await getReadyDb();
-  await db.query(`UPDATE users SET role = 'ADMIN' WHERE id = $1`, [userId]);
-  return "ADMIN";
-}
-
-/**
  * Resolves the active session cookie AND validates user existence, live RBAC role,
  * and `sessionVersion` against PostgreSQL so password resets and role demotions take effect immediately.
  * Wrapped in React `cache()` so multiple calls within the same server render pass execute only once.
@@ -186,16 +165,10 @@ export const getSession = cache(async function getSession(): Promise<SessionPayl
       return null;
     }
 
-    const authoritativeRole = await ensureBootstrapAdminRole(
-      user.id,
-      user.email,
-      user.role
-    );
-
     return {
       userId: user.id,
       email: user.email,
-      role: authoritativeRole,
+      role: user.role,
       sessionVersion: user.sessionVersion,
       exp: verified.exp,
     };

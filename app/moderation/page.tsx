@@ -179,12 +179,13 @@ export default function ModerationPortalPage() {
     }
 
     let active = true;
+    const controller = new AbortController();
     async function loadPortalData() {
       try {
         const [modRes, reqRes, repRes] = await Promise.all([
-          fetch("/api/moderation?status=ALL", { cache: "no-store" }),
-          fetch("/api/requests?status=ALL", { cache: "no-store" }),
-          fetch("/api/moderation/reports?status=ALL", { cache: "no-store" }),
+          fetch("/api/moderation?status=ALL", { cache: "no-store", signal: controller.signal }),
+          fetch("/api/requests?status=ALL", { cache: "no-store", signal: controller.signal }),
+          fetch("/api/moderation/reports?status=ALL", { cache: "no-store", signal: controller.signal }),
         ]);
 
         const [modData, reqData, repData] = await Promise.all([
@@ -205,6 +206,7 @@ export default function ModerationPortalPage() {
           setResourceReports(repData.reports || repData.data || []);
         }
       } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
         console.error("Failed to load moderation portal data:", err);
       } finally {
         if (active) {
@@ -218,6 +220,7 @@ export default function ModerationPortalPage() {
     void loadPortalData();
     return () => {
       active = false;
+      controller.abort();
     };
   }, [currentUser]);
 
@@ -227,14 +230,19 @@ export default function ModerationPortalPage() {
     }
 
     let active = true;
+    const controller = new AbortController();
     async function loadUsers() {
       try {
-        const res = await fetch("/api/admin/users", { cache: "no-store" });
+        const res = await fetch("/api/admin/users", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
         const data = res.ok ? await res.json().catch(() => null) : null;
         if (active && data?.success) {
           setUsersList(data.users || []);
         }
       } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
         console.error("Failed to fetch users list:", err);
       } finally {
         if (active) {
@@ -246,6 +254,7 @@ export default function ModerationPortalPage() {
     void loadUsers();
     return () => {
       active = false;
+      controller.abort();
     };
   }, [activePortalTab, currentUser]);
 

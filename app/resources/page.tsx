@@ -156,6 +156,7 @@ function ResourcesCatalogContent() {
   // Fetch approved course materials from API with bounded SQL pagination & IndexedDB offline fallback
   useEffect(() => {
     let mounted = true;
+    const controller = new AbortController();
 
     async function loadData() {
       setLoading(true);
@@ -201,7 +202,9 @@ function ResourcesCatalogContent() {
             if (deferredQuery.trim()) params.set("query", deferredQuery.trim());
             params.set("sort", sortBy);
 
-            const res = await fetch(`/api/resources?${params.toString()}`);
+            const res = await fetch(`/api/resources?${params.toString()}`, {
+              signal: controller.signal,
+            });
             const data = res.ok ? await res.json() : null;
             const list = Array.isArray(data?.resources)
               ? data.resources
@@ -219,7 +222,8 @@ function ResourcesCatalogContent() {
                 cacheCatalogResources(normalized).catch(() => {});
               }
             }
-          } catch {
+          } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") return;
             fetchedOnline = false;
           }
         }
@@ -255,6 +259,7 @@ function ResourcesCatalogContent() {
     loadData();
     return () => {
       mounted = false;
+      controller.abort();
     };
   }, [
     currentPage,

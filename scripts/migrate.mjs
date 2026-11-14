@@ -37,9 +37,18 @@ const pool = new pg.Pool({
 
 try {
   console.log("Applying NUESApedia database migrations...");
+  // Apply the entire schema inside one transaction so a mid-file failure rolls
+  // back cleanly instead of leaving a partially-migrated database behind.
+  await pool.query("BEGIN");
   await pool.query(sql);
+  await pool.query("COMMIT");
   console.log("Database migrations applied successfully.");
 } catch (err) {
+  try {
+    await pool.query("ROLLBACK");
+  } catch {
+    // Ignore rollback failures (e.g. the connection already dropped).
+  }
   const details =
     err && typeof err === "object" && Array.isArray(err.errors)
       ? err.errors.map((e) => e?.message || String(e)).join("; ")

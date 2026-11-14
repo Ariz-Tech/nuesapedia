@@ -1,4 +1,4 @@
-import { getApprovedResourcesPaginated } from "@/lib/db";
+import { getApprovedResourcesPaginated, toPublicResource } from "@/lib/db";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 
 /**
@@ -41,7 +41,7 @@ export async function GET(req: Request) {
     });
 
     return apiSuccess({
-      resources: result.resources,
+      resources: result.resources.map(toPublicResource),
       pagination: {
         page: result.page,
         limit: result.limit,

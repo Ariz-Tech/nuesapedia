@@ -8,7 +8,17 @@ export async function GET(
 ) {
   try {
     const { departmentId } = await context.params;
-    const dept = resolveDepartment(decodeURIComponent(departmentId));
+    let decodedId: string;
+    try {
+      decodedId = decodeURIComponent(departmentId);
+    } catch {
+      return apiError(
+        "VALIDATION_ERROR",
+        "Malformed department identifier.",
+        400
+      );
+    }
+    const dept = resolveDepartment(decodedId);
 
     if (!dept) {
       return apiError("NOT_FOUND", "Engineering department not found.", 404);
