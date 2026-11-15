@@ -52,8 +52,15 @@ export async function POST(req: Request) {
       );
     }
 
-    // Fail transparently if production email delivery isn't configured yet
-    if (process.env.NODE_ENV === "production" && !process.env.RESEND_API_KEY?.trim()) {
+    // Canonical application origin for reset links. Strictly avoid reflecting untrusted
+    // incoming Host headers, and fail loudly in production instead of guessing a domain.
+    const appOrigin = process.env.APP_URL?.trim().replace(/\/$/, "");
+
+    // Fail transparently if production email delivery / reset-link origin isn't configured yet
+    if (
+      process.env.NODE_ENV === "production" &&
+      (!process.env.RESEND_API_KEY?.trim() || !appOrigin)
+    ) {
       return apiError(
         "EMAIL_UNAVAILABLE",
         "Automated email password reset is not configured yet. Please contact a NUESA Administrator for identity verification.",
@@ -72,17 +79,7 @@ export async function POST(req: Request) {
     const { rawToken, tokenHash } = generateResetToken();
     await createPasswordResetToken(user.id, tokenHash, 15);
 
-    // Canonical application origin for reset links - strictly avoid reflecting untrusted incoming Host headers
-    const configuredOrigin =
-      process.env.APP_URL?.replace(/\/$/, "") ||
-      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-
-    const origin =
-      configuredOrigin ||
-      (process.env.NODE_ENV === "production"
-        ? "https://nuesalib.com.ng"
-        : "http://localhost:3000");
-
+    const origin = appOrigin || "http://localhost:3000";
     const resetUrl = `${origin}/forgot-password?token=${encodeURIComponent(rawToken)}`;
 
     const delivery = await sendPasswordResetEmail({

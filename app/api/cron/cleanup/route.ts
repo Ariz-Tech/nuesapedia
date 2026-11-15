@@ -59,10 +59,22 @@ export async function GET(req: Request) {
       expiredRateLimitsCleared = res.rowCount ?? 0;
     }
 
+    // 3. Purge consumed and expired password reset tokens
+    let expiredResetTokensCleared = 0;
+    if (!isDevMemoryMode()) {
+      const db = await getReadyDb();
+      const res = await db.query(
+        `DELETE FROM password_reset_tokens
+         WHERE used_at IS NOT NULL OR expires_at < CURRENT_TIMESTAMP`
+      );
+      expiredResetTokensCleared = res.rowCount ?? 0;
+    }
+
     return apiSuccess({
       prunedUploads: prunedKeys.length,
       deletedR2Objects: deletedR2Count,
       expiredRateLimitsCleared,
+      expiredResetTokensCleared,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

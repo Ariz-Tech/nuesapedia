@@ -291,6 +291,13 @@ export async function createPasswordResetToken(
   const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
   if (isDevMemoryMode()) {
+    // Mirror the SQL path: invalidate previously issued unused tokens for this
+    // user so only the newest reset link remains valid.
+    for (const existing of devStore.resetTokens.values()) {
+      if (existing.userId === userId && existing.usedAt === null) {
+        existing.usedAt = Date.now();
+      }
+    }
     devStore.resetTokens.set(tokenHash, {
       id,
       userId,

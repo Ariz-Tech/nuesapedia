@@ -59,6 +59,8 @@ export async function sendPasswordResetEmail(params: {
           </div>
         `,
       }),
+      // Never let a stalled Resend API hang the request handler.
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!res.ok) {

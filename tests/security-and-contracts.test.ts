@@ -125,6 +125,37 @@ test("Password reset tokens are single-use and revoke active sessions", async ()
   assert.equal(replayed, null);
 });
 
+test("Issuing a new reset token invalidates the previous unused token", async () => {
+  const student = await createUser({
+    name: "Bello",
+    email: "bello@fuoye.edu.ng",
+    password: await hashPassword("InitialPass2"),
+    department: "Civil Engineering",
+    level: "200L",
+    avatar: "https://api.dicebear.com/7.x/lorelei/svg?seed=Bel",
+  });
+
+  const first = generateResetToken();
+  await createPasswordResetToken(student.id, first.tokenHash, 15);
+
+  const second = generateResetToken();
+  await createPasswordResetToken(student.id, second.tokenHash, 15);
+
+  // The superseded token can no longer be consumed...
+  const superseded = await consumePasswordResetToken(
+    first.tokenHash,
+    await hashPassword("NewPass123")
+  );
+  assert.equal(superseded, null);
+
+  // ...but the most recently issued token still works.
+  const consumed = await consumePasswordResetToken(
+    second.tokenHash,
+    await hashPassword("NewPass123")
+  );
+  assert.ok(consumed);
+});
+
 test("Moderation boundary & deletion protection on submissions", async () => {
   const pending = await createSubmission({
     id: "sub_pending_1",

@@ -112,7 +112,7 @@ It provides a centralized platform for undergraduate engineering students to acc
 |---|---|---|---|
 | `DATABASE_URL` | Production | PostgreSQL connection string (`postgresql://user:pass@host:5432/db`) | `""` (In-memory dev mode) |
 | `SESSION_SECRET` | Production | High-entropy secret key (min 32 chars) for signing session cookies | Fallback dev secret |
-| `NEXT_PUBLIC_APP_URL` | Production | Public domain URL for generating password reset links | `http://localhost:3000` |
+| `APP_URL` | Production | Canonical app origin used to build password reset links | `http://localhost:3000` |
 | `ADMIN_EMAILS` | Optional | Comma-separated emails automatically assigned `ADMIN` role | `admin@fuoye.edu.ng` |
 | `R2_ACCOUNT_ID` | Production | Cloudflare R2 Account ID | `""` (Mock storage dev mode) |
 | `R2_ACCESS_KEY_ID` | Production | Cloudflare R2 Access Key ID | `""` |
