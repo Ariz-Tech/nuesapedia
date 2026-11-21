@@ -38,14 +38,20 @@ export default function UploadPage() {
     <div className="min-h-screen bg-[#FAFAFA] flex flex-col">
       <Navbar />
 
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="mb-6 flex items-center justify-between">
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10">
+        <div className="mb-6 flex items-center justify-between gap-4">
           <Link
-            href="/profile"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors"
+            href="/resources"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-brand-emerald transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Back to Student Profile</span>
+            <span>Back to Resources</span>
+          </Link>
+          <Link
+            href="/profile"
+            className="text-xs font-semibold text-brand-emerald hover:underline"
+          >
+            My Submissions
           </Link>
         </div>
 

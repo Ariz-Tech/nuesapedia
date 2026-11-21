@@ -37,9 +37,9 @@ import {
   Share2,
   Check,
   CheckCircle2,
-  Presentation,
 } from "lucide-react";
 import { getFileFormatDisplay } from "@/lib/file-utils";
+import DocumentFallbackPreview from "@/components/DocumentFallbackPreview";
 
 interface ResourceReaderClientProps {
   resourceId: string;
@@ -476,62 +476,18 @@ export default function ResourceReaderClient({
                   </div>
                 )}
 
-                <div className="relative w-full h-[680px] rounded-2xl border border-slate-200 overflow-hidden bg-slate-100 shadow-inner">
+                <div className="relative w-full h-[65vh] min-h-[420px] sm:h-[75vh] max-h-[860px] rounded-2xl border border-slate-200 overflow-hidden bg-slate-100 shadow-inner">
                   {pdfSrc &&
                   (() => {
                     const formatInfo = getFileFormatDisplay(resource.fileName);
                     return formatInfo.isPresentation || formatInfo.isWord || formatInfo.isSpreadsheet;
                   })() ? (
-                    (() => {
-                      const formatInfo = getFileFormatDisplay(resource.fileName);
-                      return (
-                        <div className="w-full h-full flex flex-col items-center justify-center p-8 sm:p-12 text-center bg-white">
-                          <div
-                            className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-4 shadow-sm ${
-                              formatInfo.isPresentation
-                                ? "bg-amber-100 text-amber-700"
-                                : formatInfo.isWord
-                                ? "bg-blue-100 text-blue-700"
-                                : "bg-emerald-100 text-[#00875A]"
-                            }`}
-                          >
-                            {formatInfo.isPresentation ? (
-                              <Presentation className="w-8 h-8" />
-                            ) : (
-                              <FileText className="w-8 h-8" />
-                            )}
-                          </div>
-                          <span className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
-                            {formatInfo.label} • {formatInfo.extension}
-                          </span>
-                          <h4 className="text-xl font-bold text-slate-900 max-w-md mb-2">
-                            {resource.title}
-                          </h4>
-                          <p className="text-xs sm:text-sm text-slate-500 max-w-md mb-6 leading-relaxed">
-                            {resource.fileName || "This file"} is published in native {formatInfo.label} format. Download it directly to your device or open it in your reader.
-                          </p>
-                          <div className="flex flex-wrap items-center justify-center gap-3">
-                            <button
-                              type="button"
-                              onClick={() => downloadMaterial(resource, { saveToDevice: true })}
-                              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#00875A] hover:bg-[#00734c] text-white text-xs font-bold shadow-xs cursor-pointer"
-                            >
-                              <Download className="w-4 h-4" />
-                              <span>Download {formatInfo.isPresentation ? "Slides" : "Document"}</span>
-                            </button>
-                            <a
-                              href={pdfSrc}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer"
-                            >
-                              <span>Open File</span>
-                              <ExternalLink className="w-3.5 h-3.5" />
-                            </a>
-                          </div>
-                        </div>
-                      );
-                    })()
+                    <DocumentFallbackPreview
+                      title={resource.title}
+                      fileName={resource.fileName}
+                      fileUrl={pdfSrc}
+                      onDownload={() => downloadMaterial(resource, { saveToDevice: true })}
+                    />
                   ) : pdfSrc ? (
                     <iframe
                       src={`${pdfSrc}#toolbar=1&view=FitH`}
@@ -570,37 +526,37 @@ export default function ResourceReaderClient({
               Course &amp; Material Details
             </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                <div className="text-[11px] font-bold uppercase text-slate-400">Course</div>
-                <div className="text-sm font-extrabold text-slate-900 mt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-2">
+              <div className="p-4 rounded-2xl bg-surface-subtle border border-slate-200/70">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Course</div>
+                <div className="text-sm font-extrabold text-brand-forest mt-1">
                   {resource.courseCode} — {courseMeta.title}
                 </div>
               </div>
 
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                <div className="text-[11px] font-bold uppercase text-slate-400">Department</div>
+              <div className="p-4 rounded-2xl bg-surface-subtle border border-slate-200/70">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Department</div>
                 <div className="text-sm font-bold text-slate-900 mt-1">{resource.department}</div>
               </div>
 
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                <div className="text-[11px] font-bold uppercase text-slate-400">Academic Level</div>
-                <div className="text-base font-extrabold text-slate-900 mt-1">{resource.level}</div>
+              <div className="p-4 rounded-2xl bg-surface-subtle border border-slate-200/70">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Academic Level</div>
+                <div className="text-sm font-extrabold text-slate-900 mt-1">{resource.level}</div>
               </div>
 
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                <div className="text-[11px] font-bold uppercase text-slate-400">Semester</div>
+              <div className="p-4 rounded-2xl bg-surface-subtle border border-slate-200/70">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Semester</div>
                 <div className="text-sm font-bold text-slate-900 mt-1">{resource.semester}</div>
               </div>
 
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                <div className="text-[11px] font-bold uppercase text-slate-400">Category</div>
+              <div className="p-4 rounded-2xl bg-surface-subtle border border-slate-200/70">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Category</div>
                 <div className="text-sm font-bold text-slate-900 mt-1">{resource.type}</div>
               </div>
 
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                <div className="text-[11px] font-bold uppercase text-slate-400">Verification</div>
-                <div className="text-sm font-bold text-emerald-700 mt-1 inline-flex items-center gap-1.5">
+              <div className="p-4 rounded-2xl bg-surface-subtle border border-slate-200/70">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Verification</div>
+                <div className="text-sm font-bold text-brand-emerald mt-1 inline-flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4" />
                   <span>Faculty Approved</span>
                 </div>

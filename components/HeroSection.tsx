@@ -21,43 +21,50 @@ export default function HeroSection() {
   return (
     <section
       id="hero-section"
-      className="relative pt-16 pb-20 md:pt-24 md:pb-28 bg-[#FAFAFA] overflow-hidden group cursor-default"
+      className="relative pt-16 pb-20 md:pt-24 md:pb-28 bg-canvas overflow-hidden group cursor-default"
     >
-      {/* Soft animated SVG background lines with responsive green horizontal and vertical hover lines */}
+      {/* Architectural blueprint grid with subtle interactive cursor lines */}
       <HeroBackgroundLines />
+
+      {/* Radial surface soft-fade behind typography so interactive grid lines never impair legibility */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(ellipse_60%_55%_at_50%_46%,rgba(250,250,250,0.88)_0%,rgba(250,250,250,0.45)_60%,rgba(250,250,250,0)_100%)]"
+      />
 
       <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         {/* Main Title */}
-        <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight text-slate-900 leading-[1.15]">
+        <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight text-brand-forest leading-[1.12]">
           Everything You Need to <br />
-          <span className="text-[#00875A]">Study Engineering.</span>
+          <span className="text-brand-emerald">Study Engineering.</span>
         </h1>
 
         {/* Subtitle */}
         <p className="mt-6 text-base sm:text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">
           Access course materials, lecture notes, past questions, videos, and study resources for{" "}
-          <span className="font-medium text-slate-800">FUOYE engineering courses</span>, all in one place.
+          <span className="font-semibold text-slate-800">FUOYE engineering courses</span>, all in one place.
         </p>
 
         {/* Search Bar Container */}
         <div className="mt-10 max-w-3xl mx-auto">
           <form
             onSubmit={handleSearch}
-            className="flex flex-col sm:flex-row items-center bg-white rounded-2xl sm:rounded-full p-2 border border-slate-200/90 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.06)] hover:border-slate-300 transition-all focus-within:border-emerald-600 focus-within:ring-2 focus-within:ring-emerald-100"
+            className="flex flex-col sm:flex-row items-center bg-surface rounded-2xl sm:rounded-full p-2 border border-slate-200/90 shadow-[var(--shadow-card)] hover:border-slate-300 transition-all focus-within:border-brand-emerald focus-within:ring-2 focus-within:ring-brand-emerald/15"
           >
-            <div className="flex items-center flex-1 w-full px-3 py-2 sm:py-1">
-              <Search className="w-5 h-5 text-slate-400 shrink-0 mr-3" />
+            <div className="flex items-center flex-1 w-full px-3.5 py-2 sm:py-1">
+              <Search className="w-5 h-5 text-slate-500 shrink-0 mr-3" />
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                aria-label="Search course materials by title or course code"
                 placeholder='Search by course title or code (e.g., "MEE 302" or "Fluid Mechanics")'
-                className="w-full text-sm sm:text-base text-slate-800 placeholder:text-slate-400 bg-transparent border-none outline-none focus:ring-0"
+                className="w-full text-sm sm:text-base text-slate-900 placeholder:text-slate-500 bg-transparent border-none outline-none focus:ring-0 focus-visible:outline-none"
               />
             </div>
             <button
               type="submit"
-              className="w-full sm:w-auto mt-2 sm:mt-0 px-7 py-3 text-sm font-semibold text-white bg-[#00875A] hover:bg-[#00734c] rounded-xl sm:rounded-full transition-all shadow-sm hover:shadow shrink-0 cursor-pointer"
+              className="w-full sm:w-auto mt-2 sm:mt-0 px-7 py-3 text-sm font-semibold text-white bg-brand-emerald hover:bg-brand-emerald-hover rounded-xl sm:rounded-full transition-colors shadow-xs shrink-0 cursor-pointer"
             >
               Search Library
             </button>

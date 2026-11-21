@@ -71,7 +71,7 @@ const LEVELS = ["100L", "200L", "300L", "400L", "500L"];
 export default function ProfilePage() {
   const router = useRouter();
   const { user: authUser, loading: authLoading, refresh: refreshAuth, logout: authLogout } = useAuth();
-  const { savedCount, offlineCount, offlineTotalBytes } = useSavedResources();
+  const { savedCount, offlineCount, shelfCount, offlineTotalBytes } = useSavedResources();
 
   const user: UserProfile | null = authUser
     ? {
@@ -333,30 +333,30 @@ export default function ProfilePage() {
 
               <div>
                 <div className="flex items-center gap-2.5 flex-wrap">
-                  <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+                  <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-brand-forest">
                     {user.name || "Student"}
                   </h1>
-                  <span className="text-[11px] font-semibold tracking-wide uppercase px-2.5 py-0.5 rounded-full bg-emerald-100/70 text-[#00875A]">
+                  <span className="text-[11px] font-semibold tracking-wide uppercase px-2.5 py-0.5 rounded-full bg-emerald-100/70 text-brand-emerald">
                     {user.role}
                   </span>
                 </div>
 
-                <div className="mt-1 flex items-center gap-1.5 text-xs sm:text-sm text-slate-500">
-                  <Mail className="w-3.5 h-3.5" />
+                <div className="mt-1 flex items-center gap-1.5 text-xs sm:text-sm text-slate-600">
+                  <Mail className="w-3.5 h-3.5 text-slate-500" />
                   <span>{user.email}</span>
                 </div>
 
                 <div className="mt-3 flex items-center gap-2 flex-wrap">
                   <span className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1 rounded-lg bg-slate-100 text-slate-700">
-                    <Building2 className="w-3 h-3 text-slate-400" />
+                    <Building2 className="w-3 h-3 text-slate-500" />
                     <span>{user.department}</span>
                   </span>
                   <span className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1 rounded-lg bg-slate-100 text-slate-700">
-                    <GraduationCap className="w-3 h-3 text-slate-400" />
+                    <GraduationCap className="w-3 h-3 text-slate-500" />
                     <span>{user.level}</span>
                   </span>
                   <span className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1 rounded-lg bg-emerald-50 text-emerald-800">
-                    <UserCheck className="w-3 h-3 text-emerald-600" />
+                    <UserCheck className="w-3 h-3 text-brand-emerald" />
                     <span>Faculty of Engineering &bull; FUOYE</span>
                   </span>
                 </div>
@@ -367,16 +367,16 @@ export default function ProfilePage() {
             <div className="flex items-center gap-2.5 self-start md:self-auto shrink-0 flex-wrap">
               <Link
                 href="/saved"
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition-all shadow-2xs"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-surface hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition-colors shadow-2xs"
               >
-                <Bookmark className="w-4 h-4 text-[#00875A]" />
-                <span>Saved &amp; Offline ({savedCount + offlineCount})</span>
+                <Bookmark className="w-4 h-4 text-brand-emerald" />
+                <span>Saved &amp; Offline ({shelfCount})</span>
               </Link>
 
               {(user.role === "MODERATOR" || user.role === "ADMIN") && (
                 <Link
                   href="/moderation"
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0C3B2E] hover:bg-[#0A251D] text-white text-xs sm:text-sm font-semibold transition-all shadow-xs"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-forest hover:bg-brand-forest-dark text-white text-xs sm:text-sm font-semibold transition-colors shadow-xs"
                 >
                   <span>Moderation Portal</span>
                 </Link>
@@ -385,7 +385,7 @@ export default function ProfilePage() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs sm:text-sm font-medium transition-colors cursor-pointer"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
                 <span>Log out</span>
@@ -399,32 +399,32 @@ export default function ProfilePage() {
           {/* Main Column with Tabs (2 cols) */}
           <div className="lg:col-span-2 space-y-6">
             {/* Navigation Tabs Bar */}
-            <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-200/60 rounded-2xl w-fit">
+            <div className="flex items-center gap-1.5 p-1.5 bg-slate-200/70 rounded-2xl w-full sm:w-fit overflow-x-auto no-scrollbar">
               <button
                 type="button"
                 onClick={() => setActiveTab("upload")}
-                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
                   activeTab === "upload"
-                    ? "bg-white text-slate-900 shadow-2xs"
+                    ? "bg-surface text-brand-forest shadow-2xs"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                <UploadCloud className="w-4 h-4 text-[#00875A]" />
+                <UploadCloud className="w-4 h-4 text-brand-emerald" />
                 <span>Contribute Material</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveTab("submissions")}
-                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
                   activeTab === "submissions"
-                    ? "bg-white text-slate-900 shadow-2xs"
+                    ? "bg-surface text-brand-forest shadow-2xs"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                <FileCheck2 className="w-4 h-4 text-[#00875A]" />
+                <FileCheck2 className="w-4 h-4 text-brand-emerald" />
                 <span>My Contributions</span>
-                <span className="text-[11px] px-1.5 py-0.2 rounded-full bg-slate-100 text-slate-700 font-bold">
+                <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold leading-none">
                   {submissions.length}
                 </span>
               </button>
@@ -432,13 +432,13 @@ export default function ProfilePage() {
               <button
                 type="button"
                 onClick={() => setActiveTab("settings")}
-                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
                   activeTab === "settings"
-                    ? "bg-white text-slate-900 shadow-2xs"
+                    ? "bg-surface text-brand-forest shadow-2xs"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                <Settings className="w-4 h-4 text-[#00875A]" />
+                <Settings className="w-4 h-4 text-brand-emerald" />
                 <span>Account &amp; Security</span>
               </button>
             </div>
@@ -464,10 +464,10 @@ export default function ProfilePage() {
                       <FileCheck2 className="w-4 h-4" />
                     </div>
                     <div>
-                      <h2 className="text-base sm:text-lg font-bold text-slate-900">
+                      <h2 className="text-base sm:text-lg font-bold text-brand-forest">
                         My Uploaded Contributions
                       </h2>
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-slate-500">
                         Track verification status and moderator feedback on your uploaded materials
                       </p>
                     </div>
@@ -476,7 +476,7 @@ export default function ProfilePage() {
                   <button
                     type="button"
                     onClick={() => setActiveTab("upload")}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#00875A] hover:underline cursor-pointer"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-emerald hover:underline cursor-pointer shrink-0"
                   >
                     <PlusCircle className="w-3.5 h-3.5" />
                     <span>Upload New</span>
@@ -485,16 +485,16 @@ export default function ProfilePage() {
 
                 <div className="mt-6 space-y-3">
                   {submissions.length === 0 ? (
-                    <div className="text-center py-12 px-4 border border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
-                      <UploadCloud className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                      <p className="text-sm font-semibold text-slate-700">No submissions uploaded yet</p>
-                      <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                    <div className="text-center py-12 px-4 border border-dashed border-slate-300 rounded-2xl bg-surface-subtle">
+                      <UploadCloud className="w-10 h-10 text-slate-400 mx-auto mb-2.5" />
+                      <p className="text-sm font-bold text-brand-forest">No submissions uploaded yet</p>
+                      <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-sm mx-auto">
                         Share lecture handouts, past questions, or YouTube tutorials to help fellow FUOYE engineering students.
                       </p>
                       <button
                         type="button"
                         onClick={() => setActiveTab("upload")}
-                        className="inline-block mt-4 px-5 py-2.5 rounded-full text-xs font-semibold text-white bg-[#00875A] hover:bg-[#00734c] transition-all cursor-pointer"
+                        className="inline-block mt-4 px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-brand-emerald hover:bg-brand-emerald-hover transition-colors cursor-pointer"
                       >
                         Submit Your First Material
                       </button>
@@ -560,13 +560,13 @@ export default function ProfilePage() {
                                   {sub.title}
                                 </h3>
 
-                                <div className="mt-1 flex items-center gap-2.5 text-[11px] text-slate-400 flex-wrap">
+                                <div className="mt-1 flex items-center gap-2.5 text-xs text-slate-500 flex-wrap">
                                   <span>{isYouTube ? "YouTube Video" : sub.fileSize}</span>
                                   <span>&bull;</span>
                                   <span>{sub.semester}</span>
                                   <span>&bull;</span>
                                   <span className="flex items-center gap-1">
-                                    <Clock className="w-3 h-3 text-slate-400" />
+                                    <Clock className="w-3 h-3 text-slate-500" />
                                     {new Date(sub.createdAt).toLocaleDateString()}
                                   </span>
                                 </div>
@@ -594,9 +594,10 @@ export default function ProfilePage() {
 
                               {isApproved && (
                                 <Link
-                                  href={`/resources?open=${encodeURIComponent(sub.id)}`}
-                                  className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-[#00875A] hover:border-emerald-300 transition-colors"
+                                  href={`/resources/${encodeURIComponent(sub.id)}`}
+                                  className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-brand-emerald hover:border-emerald-300 transition-colors"
                                   title="Open in Library"
+                                  aria-label={`Open ${sub.title} in Library`}
                                 >
                                   <Eye className="w-4 h-4" />
                                 </Link>
@@ -845,29 +846,29 @@ export default function ProfilePage() {
           {/* Right Column: Live Vault Summary & Department Details */}
           <div className="space-y-6">
             {/* Live Saved & Offline Vault Card */}
-            <div className="bg-white border border-slate-200/90 rounded-3xl p-6 shadow-xs">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">
+            <div className="bg-surface border border-slate-200/90 rounded-3xl p-6 shadow-xs">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4">
                 Study Shelf &amp; Offline Vault
               </h3>
               <div className="grid grid-cols-3 gap-3 mb-4">
-                <div className="p-3.5 rounded-2xl bg-[#F8FAFC] border border-slate-100 text-center">
-                  <div className="text-xl font-extrabold text-[#0C3B2E]">{savedCount}</div>
-                  <div className="text-[11px] text-slate-500 mt-1">Bookmarked</div>
+                <div className="p-3.5 rounded-2xl bg-surface-subtle border border-slate-200/70 text-center">
+                  <div className="text-xl font-extrabold text-brand-forest">{savedCount}</div>
+                  <div className="text-[11px] font-medium text-slate-600 mt-1">Bookmarked</div>
                 </div>
-                <div className="p-3.5 rounded-2xl bg-[#F8FAFC] border border-slate-100 text-center">
-                  <div className="text-xl font-extrabold text-[#00875A]">{offlineCount}</div>
-                  <div className="text-[11px] text-slate-500 mt-1">Offline PDFs</div>
+                <div className="p-3.5 rounded-2xl bg-surface-subtle border border-slate-200/70 text-center">
+                  <div className="text-xl font-extrabold text-brand-emerald">{offlineCount}</div>
+                  <div className="text-[11px] font-medium text-slate-600 mt-1">Offline PDFs</div>
                 </div>
-                <div className="p-3.5 rounded-2xl bg-[#F8FAFC] border border-slate-100 text-center">
+                <div className="p-3.5 rounded-2xl bg-surface-subtle border border-slate-200/70 text-center">
                   <div className="text-xl font-extrabold text-slate-800">{submissions.length}</div>
-                  <div className="text-[11px] text-slate-500 mt-1">Contributed</div>
+                  <div className="text-[11px] font-medium text-slate-600 mt-1">Contributed</div>
                 </div>
               </div>
 
               {offlineCount > 0 && (
-                <div className="mb-4 px-3 py-2 rounded-xl bg-emerald-50/70 border border-emerald-200/70 text-[11px] font-medium text-emerald-900 flex items-center justify-between">
+                <div className="mb-4 px-3 py-2 rounded-xl bg-emerald-50/70 border border-emerald-200/70 text-xs font-medium text-emerald-900 flex items-center justify-between">
                   <span className="inline-flex items-center gap-1.5">
-                    <HardDriveDownload className="w-3.5 h-3.5 text-[#00875A]" />
+                    <HardDriveDownload className="w-3.5 h-3.5 text-brand-emerald" />
                     <span>Offline Storage Used</span>
                   </span>
                   <span className="font-bold">{formatBytes(offlineTotalBytes)}</span>
@@ -876,7 +877,7 @@ export default function ProfilePage() {
 
               <Link
                 href="/saved"
-                className="w-full py-2.5 px-4 rounded-xl bg-[#0C3B2E] hover:bg-[#0A251D] text-white text-xs font-bold transition-all flex items-center justify-center gap-2"
+                className="w-full py-2.5 px-4 rounded-xl bg-brand-forest hover:bg-brand-forest-dark text-white text-xs font-bold transition-colors flex items-center justify-center gap-2"
               >
                 <span>Open Saved &amp; Offline Materials</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -884,30 +885,30 @@ export default function ProfilePage() {
             </div>
 
             {/* Department Info Card */}
-            <div className="bg-white border border-slate-200/90 rounded-3xl p-6 shadow-xs">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">
+            <div className="bg-surface border border-slate-200/90 rounded-3xl p-6 shadow-xs">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-4">
                 Departmental Information
               </h3>
               <div className="space-y-3.5 text-xs sm:text-sm">
                 <div>
-                  <span className="text-slate-400 block text-[11px]">Primary Department</span>
-                  <span className="font-semibold text-slate-800">{user.department}</span>
+                  <span className="text-slate-500 block text-xs">Primary Department</span>
+                  <span className="font-semibold text-slate-900">{user.department}</span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[11px]">Faculty</span>
-                  <span className="font-semibold text-slate-800">
+                  <span className="text-slate-500 block text-xs">Faculty</span>
+                  <span className="font-semibold text-slate-900">
                     Faculty of Engineering (NUESA)
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[11px]">Institution</span>
-                  <span className="font-semibold text-slate-800">
+                  <span className="text-slate-500 block text-xs">Institution</span>
+                  <span className="font-semibold text-slate-900">
                     Federal University Oye-Ekiti (FUOYE)
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[11px]">Academic Session</span>
-                  <span className="font-semibold text-slate-800">2025 / 2026</span>
+                  <span className="text-slate-500 block text-xs">Academic Session</span>
+                  <span className="font-semibold text-slate-900">2025 / 2026</span>
                 </div>
               </div>
             </div>

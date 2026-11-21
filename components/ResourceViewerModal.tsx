@@ -16,7 +16,6 @@ import {
   WifiOff,
   HardDriveDownload,
   Maximize2,
-  Presentation,
 } from "lucide-react";
 import {
   type CourseMaterialItem,
@@ -35,6 +34,7 @@ import { resolveCourseMetadata } from "@/lib/courses";
 import { extractApiError } from "@/lib/api-helpers";
 import { getFileFormatDisplay } from "@/lib/file-utils";
 import { useTrackedBlobUrl } from "@/lib/hooks/useTrackedBlobUrl";
+import DocumentFallbackPreview from "@/components/DocumentFallbackPreview";
 
 interface ResourceViewerModalProps {
   material: CourseMaterialItem | null;
@@ -251,59 +251,71 @@ function ResourceViewerModalOpen({
     >
       <div
         ref={dialogRef}
-        className="bg-white w-full max-w-6xl max-h-[94vh] rounded-2xl sm:rounded-3xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden"
+        className="bg-surface w-full max-w-6xl max-h-[94vh] rounded-2xl sm:rounded-3xl border border-slate-200 shadow-[var(--shadow-modal)] flex flex-col overflow-hidden animate-ui-scale"
       >
         {/* Modal Header */}
-        <div className="px-4 sm:px-6 py-4 border-b border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 mb-1">
-              <span
-                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wider uppercase ${badge.className}`}
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-200 bg-surface flex flex-col gap-3 shrink-0">
+          {/* Top Row: Title & Always-Pinned Close Button */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1">
+                <span
+                  className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wider uppercase ${badge.className}`}
+                >
+                  {badge.label}
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-brand-forest text-white font-mono text-[11px] font-bold">
+                  {material.courseCode}
+                </span>
+                {material.sessionYear && (
+                  <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-semibold">
+                    {material.sessionYear}
+                  </span>
+                )}
+                {cachedOffline && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-brand-emerald border border-emerald-200 text-[11px] font-bold">
+                    <HardDriveDownload className="w-3 h-3" />
+                    <span>Available Offline</span>
+                  </span>
+                )}
+                {material.level && material.level !== "All Levels" && (
+                  <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[11px] font-semibold">
+                    {material.level}
+                  </span>
+                )}
+                <span className="hidden sm:inline text-xs text-slate-500 font-medium truncate">
+                  {courseMeta.title}
+                </span>
+              </div>
+
+              <h2
+                id="viewer-modal-title"
+                className="text-base sm:text-lg font-extrabold text-brand-forest truncate"
               >
-                {badge.label}
-              </span>
-              <span className="px-2 py-0.5 rounded-md bg-[#0C3B2E] text-white font-mono text-[11px] font-bold">
-                {material.courseCode}
-              </span>
-              {material.sessionYear && (
-                <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-semibold">
-                  {material.sessionYear}
-                </span>
-              )}
-              {cachedOffline && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-[#00875A] border border-emerald-200 text-[11px] font-bold">
-                  <HardDriveDownload className="w-3 h-3" />
-                  <span>Available Offline</span>
-                </span>
-              )}
-              {material.level && material.level !== "All Levels" && (
-                <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-semibold">
-                  {material.level}
-                </span>
-              )}
-              <span className="text-[11px] text-slate-400 font-medium truncate">
-                {courseMeta.title}
-              </span>
+                {material.title}
+              </h2>
             </div>
 
-            <h2
-              id="viewer-modal-title"
-              className="text-base sm:text-lg font-extrabold text-[#0C3B2E] truncate"
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+              aria-label="Close viewer"
             >
-              {material.title}
-            </h2>
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Action Toolbar */}
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
             {!isVideo && (
               <button
                 type="button"
                 onClick={handleToggleCompleted}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
                   readingPct >= 100
-                    ? "bg-emerald-50 border-emerald-200 text-[#00875A]"
-                    : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                    ? "bg-emerald-50 border-emerald-200 text-brand-emerald"
+                    : "bg-surface border-slate-200 text-slate-700 hover:bg-slate-50"
                 }`}
                 title="Track whether you have finished studying this document"
               >
@@ -316,10 +328,10 @@ function ResourceViewerModalOpen({
               type="button"
               onClick={() => onToggleBookmark(material)}
               disabled={isTogglingBookmark}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
                 isBookmarked
                   ? "bg-slate-100 border-slate-300 text-slate-900"
-                  : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                  : "bg-surface border-slate-200 text-slate-700 hover:bg-slate-50"
               }`}
             >
               {isTogglingBookmark ? (
@@ -341,12 +353,12 @@ function ResourceViewerModalOpen({
               type="button"
               onClick={handleShare}
               title="Share or copy direct link to this material"
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl border border-slate-200 bg-surface hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
             >
               {copiedLink ? (
                 <>
-                  <Check className="w-3.5 h-3.5 text-[#00875A]" />
-                  <span className="text-[#00875A] font-bold">Link Copied</span>
+                  <Check className="w-3.5 h-3.5 text-brand-emerald" />
+                  <span className="text-brand-emerald font-bold">Link Copied</span>
                 </>
               ) : (
                 <>
@@ -371,14 +383,14 @@ function ResourceViewerModalOpen({
                     }
                   }
                 }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#00875A] hover:bg-[#00734c] disabled:opacity-60 text-white text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 sm:py-2 rounded-xl bg-brand-emerald hover:bg-brand-emerald-hover disabled:opacity-60 text-white text-xs font-bold transition-colors shadow-2xs cursor-pointer"
               >
                 {isDownloading ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
                   <Download className="w-3.5 h-3.5" />
                 )}
-                <span>{cachedOffline ? "Save PDF Copy" : "Download"}</span>
+                <span>{cachedOffline ? "Save Copy" : "Download"}</span>
               </button>
             )}
 
@@ -387,7 +399,7 @@ function ResourceViewerModalOpen({
                 href={youtubeWatchUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0C3B2E] hover:bg-[#0A251D] text-white text-xs font-bold transition-all"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 sm:py-2 rounded-xl bg-brand-forest hover:bg-brand-forest-dark text-white text-xs font-bold transition-colors"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
                 <span>YouTube</span>
@@ -399,7 +411,7 @@ function ResourceViewerModalOpen({
                 href={pdfSrc}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors"
                 title="Open document in new tab"
               >
                 <Maximize2 className="w-3.5 h-3.5" />
@@ -413,24 +425,15 @@ function ResourceViewerModalOpen({
                 onClick={() => setShowReportBar((prev) => !prev)}
                 title="Report broken file or wrong course metadata"
                 aria-label="Report issue with this material"
-                className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+                className={`ml-auto p-1.5 sm:p-2 rounded-xl border transition-colors cursor-pointer ${
                   showReportBar
                     ? "border-amber-300 bg-amber-50 text-amber-800"
-                    : "border-slate-200 text-slate-400 hover:text-amber-700 hover:bg-amber-50/50"
+                    : "border-slate-200 text-slate-500 hover:text-amber-700 hover:bg-amber-50/50"
                 }`}
               >
                 <Flag className="w-4 h-4" />
               </button>
             )}
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-2 rounded-xl border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
-              aria-label="Close viewer"
-            >
-              <X className="w-4 h-4" />
-            </button>
           </div>
         </div>
 
@@ -582,56 +585,13 @@ function ResourceViewerModalOpen({
                   const formatInfo = getFileFormatDisplay(material.fileName);
                   return formatInfo.isPresentation || formatInfo.isWord || formatInfo.isSpreadsheet;
                 })() ? (
-                (() => {
-                  const formatInfo = getFileFormatDisplay(material.fileName);
-                  return (
-                    <div className="w-full h-full flex flex-col items-center justify-center p-8 sm:p-12 text-center bg-slate-50/50">
-                      <div
-                        className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-4 shadow-sm ${
-                          formatInfo.isPresentation
-                            ? "bg-amber-100 text-amber-700"
-                            : formatInfo.isWord
-                            ? "bg-blue-100 text-blue-700"
-                            : "bg-emerald-100 text-[#00875A]"
-                        }`}
-                      >
-                        {formatInfo.isPresentation ? (
-                          <Presentation className="w-8 h-8" />
-                        ) : (
-                          <FileText className="w-8 h-8" />
-                        )}
-                      </div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
-                        {formatInfo.label} • {formatInfo.extension}
-                      </span>
-                      <h4 className="text-lg font-bold text-slate-900 max-w-md mb-2">
-                        {material.title}
-                      </h4>
-                      <p className="text-xs text-slate-500 max-w-sm mb-6">
-                        {material.fileName || "This file"} is ready for review or study. Download it directly to your device or open it in your Office reader.
-                      </p>
-                      <div className="flex flex-wrap items-center justify-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => downloadMaterial(material, { saveToDevice: true })}
-                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#00875A] hover:bg-[#00734c] text-white text-xs font-bold shadow-xs cursor-pointer"
-                        >
-                          <Download className="w-4 h-4" />
-                          <span>Download {formatInfo.isPresentation ? "Slides" : "Document"}</span>
-                        </button>
-                        <a
-                          href={pdfSrc}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer"
-                        >
-                          <span>Open File Directly</span>
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      </div>
-                    </div>
-                  );
-                })()
+                <DocumentFallbackPreview
+                  title={material.title}
+                  fileName={material.fileName}
+                  fileUrl={pdfSrc}
+                  onDownload={() => downloadMaterial(material, { saveToDevice: true })}
+                  compact
+                />
               ) : pdfSrc ? (
                 <iframe
                   src={`${pdfSrc}#toolbar=1&view=FitH`}

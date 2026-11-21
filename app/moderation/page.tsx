@@ -19,14 +19,16 @@ import {
   AlertTriangle,
   ArrowRight,
   RefreshCw,
-  Eye,
+  Play,
   MessageSquare,
   Flag,
+  X,
 } from "lucide-react";
 import { DEPARTMENTS } from "@/lib/departments";
 import { extractApiError } from "@/lib/api-helpers";
 import YoutubeIcon from "@/components/icons/YoutubeIcon";
 import { useAuth } from "@/context/AuthContext";
+import UserManagementTab from "./components/UserManagementTab";
 import type {
   UserProfile,
   SubmissionItem,
@@ -549,10 +551,10 @@ export default function ModerationPortalPage() {
                   {isAdmin ? "System Administrator" : "Academic Moderator"}
                 </span>
               </div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-brand-forest tracking-tight">
                 Academic Moderation Portal
               </h1>
-              <p className="mt-1 text-xs sm:text-sm text-slate-500 max-w-2xl">
+              <p className="mt-1 text-xs sm:text-sm text-slate-600 max-w-2xl">
                 Review submitted PDF materials and YouTube video tutorials to guarantee high academic standard across all 5 engineering departments.
               </p>
             </div>
@@ -563,7 +565,7 @@ export default function ModerationPortalPage() {
                 type="button"
                 onClick={fetchSubmissions}
                 disabled={queueLoading}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 text-xs font-semibold transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50 text-xs font-semibold transition-colors cursor-pointer"
                 title="Refresh queue"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${queueLoading ? "animate-spin" : ""}`} />
@@ -573,7 +575,7 @@ export default function ModerationPortalPage() {
               <div className="h-6 w-px bg-slate-200" />
 
               <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
-                <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200/60 font-semibold">
+                <span className="inline-flex items-center gap-1 text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200/80 font-semibold">
                   <Clock className="w-3.5 h-3.5 text-amber-600" />
                   <span>{pendingCount} Pending</span>
                 </span>
@@ -584,7 +586,8 @@ export default function ModerationPortalPage() {
           {/* Action Feedback Toast */}
           {actionFeedback && (
             <div
-              className={`mt-4 p-3.5 rounded-2xl border text-xs sm:text-sm font-medium flex items-center justify-between gap-3 animate-in fade-in ${
+              role="status"
+              className={`mt-4 p-3.5 rounded-2xl border text-xs sm:text-sm font-medium flex items-center justify-between gap-3 animate-ui-fade ${
                 actionFeedback.type === "success"
                   ? "bg-emerald-50 border-emerald-200 text-emerald-800"
                   : "bg-rose-50 border-rose-200 text-rose-800"
@@ -600,22 +603,23 @@ export default function ModerationPortalPage() {
               </div>
               <button
                 type="button"
+                aria-label="Dismiss notification"
                 onClick={() => setActionFeedback(null)}
-                className="text-slate-400 hover:text-slate-700 font-bold"
+                className="p-1 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-black/5 cursor-pointer"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
           )}
 
           {/* Top Portal Navigation Tabs */}
-          <div className="mt-8 pt-6 border-t border-slate-100 flex items-center gap-2 overflow-x-auto">
+          <div className="mt-8 pt-6 border-t border-slate-100 flex items-center gap-2 overflow-x-auto no-scrollbar">
             <button
               type="button"
               onClick={() => setActivePortalTab("queue")}
-              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-2 ${
+              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
                 activePortalTab === "queue"
-                  ? "bg-[#0C3B2E] text-white shadow-xs"
+                  ? "bg-brand-forest text-white shadow-xs"
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
               }`}
             >
@@ -624,7 +628,7 @@ export default function ModerationPortalPage() {
               <span
                 className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
                   activePortalTab === "queue"
-                    ? "bg-[#00875A] text-white"
+                    ? "bg-brand-emerald text-white"
                     : "bg-slate-200 text-slate-700"
                 }`}
               >
@@ -635,9 +639,9 @@ export default function ModerationPortalPage() {
             <button
               type="button"
               onClick={() => setActivePortalTab("requests")}
-              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
                 activePortalTab === "requests"
-                  ? "bg-[#0C3B2E] text-white shadow-xs"
+                  ? "bg-brand-forest text-white shadow-xs"
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
               }`}
             >
@@ -646,7 +650,7 @@ export default function ModerationPortalPage() {
               <span
                 className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
                   activePortalTab === "requests"
-                    ? "bg-[#00875A] text-white"
+                    ? "bg-brand-emerald text-white"
                     : "bg-slate-200 text-slate-700"
                 }`}
               >
@@ -657,9 +661,9 @@ export default function ModerationPortalPage() {
             <button
               type="button"
               onClick={() => setActivePortalTab("reports")}
-              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
                 activePortalTab === "reports"
-                  ? "bg-[#0C3B2E] text-white shadow-xs"
+                  ? "bg-brand-forest text-white shadow-xs"
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
               }`}
             >
@@ -668,7 +672,7 @@ export default function ModerationPortalPage() {
               <span
                 className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
                   activePortalTab === "reports"
-                    ? "bg-[#00875A] text-white"
+                    ? "bg-brand-emerald text-white"
                     : "bg-slate-200 text-slate-700"
                 }`}
               >
@@ -680,15 +684,15 @@ export default function ModerationPortalPage() {
               <button
                 type="button"
                 onClick={() => setActivePortalTab("users")}
-                className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
                   activePortalTab === "users"
-                    ? "bg-[#0C3B2E] text-white shadow-xs"
+                    ? "bg-brand-forest text-white shadow-xs"
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                 }`}
               >
                 <Users className="w-4 h-4" />
                 <span>User Role Management</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-extrabold uppercase">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-extrabold uppercase">
                   Admin
                 </span>
               </button>
@@ -700,21 +704,21 @@ export default function ModerationPortalPage() {
         {activePortalTab === "queue" && (
           <div className="space-y-6">
             {/* Filter & Search Bar */}
-            <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-xs">
+            <div className="bg-surface border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-xs">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 {/* Status Sub-Filters */}
-                <div className="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0 no-scrollbar">
                   <button
                     type="button"
                     onClick={() => setStatusFilter("PENDING_REVIEW")}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
                       statusFilter === "PENDING_REVIEW"
                         ? "bg-amber-100 text-amber-900 border border-amber-300 font-extrabold shadow-2xs"
                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                     }`}
                   >
                     <span>Pending Review</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-amber-200/80 text-[10px]">
+                    <span className="px-1.5 py-0.5 rounded-full bg-amber-200/80 text-[10px] leading-none">
                       {pendingCount}
                     </span>
                   </button>
@@ -722,14 +726,14 @@ export default function ModerationPortalPage() {
                   <button
                     type="button"
                     onClick={() => setStatusFilter("APPROVED")}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
                       statusFilter === "APPROVED"
                         ? "bg-emerald-100 text-emerald-900 border border-emerald-300 font-extrabold shadow-2xs"
                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                     }`}
                   >
                     <span>Approved</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-emerald-200/80 text-[10px]">
+                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-200/80 text-[10px] leading-none">
                       {approvedCount}
                     </span>
                   </button>
@@ -737,14 +741,14 @@ export default function ModerationPortalPage() {
                   <button
                     type="button"
                     onClick={() => setStatusFilter("REJECTED")}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
                       statusFilter === "REJECTED"
                         ? "bg-rose-100 text-rose-900 border border-rose-300 font-extrabold shadow-2xs"
                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                     }`}
                   >
                     <span>Rejected</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-rose-200/80 text-[10px]">
+                    <span className="px-1.5 py-0.5 rounded-full bg-rose-200/80 text-[10px] leading-none">
                       {rejectedCount}
                     </span>
                   </button>
@@ -752,7 +756,7 @@ export default function ModerationPortalPage() {
                   <button
                     type="button"
                     onClick={() => setStatusFilter("ALL")}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer shrink-0 ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer shrink-0 ${
                       statusFilter === "ALL"
                         ? "bg-slate-800 text-white shadow-2xs"
                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -765,20 +769,22 @@ export default function ModerationPortalPage() {
                 {/* Search & Department Filters */}
                 <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
                   <div className="relative w-full sm:w-64">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="text"
+                      aria-label="Search review queue by course code or title"
                       placeholder="Search course or title..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A]"
+                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
                     />
                   </div>
 
                   <select
+                    aria-label="Filter queue by department"
                     value={departmentFilter}
                     onChange={(e) => setDepartmentFilter(e.target.value)}
-                    className="w-full sm:w-auto px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+                    className="w-full sm:w-auto px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
                   >
                     <option value="ALL">All Departments</option>
                     {DEPARTMENTS.map((dept) => (
@@ -789,9 +795,10 @@ export default function ModerationPortalPage() {
                   </select>
 
                   <select
+                    aria-label="Filter queue by media format"
                     value={mediumFilter}
                     onChange={(e) => setMediumFilter(e.target.value as "ALL" | "PDF" | "YOUTUBE")}
-                    className="w-full sm:w-auto px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+                    className="w-full sm:w-auto px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
                   >
                     <option value="ALL">All Media</option>
                     <option value="PDF">PDF Documents</option>
@@ -898,7 +905,7 @@ export default function ModerationPortalPage() {
                             className="absolute inset-0 bg-black/30 flex items-center justify-center group-hover:bg-black/40 transition-colors"
                           >
                             <div className="w-10 h-10 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
-                              <Eye className="w-5 h-5 text-white" />
+                              <Play className="w-4 h-4 fill-white ml-0.5" />
                             </div>
                           </a>
                         </div>
@@ -1144,7 +1151,7 @@ export default function ModerationPortalPage() {
 
                     <div className="flex items-center gap-2 shrink-0">
                       <Link
-                        href={`/resources?open=${encodeURIComponent(rep.resourceId)}`}
+                        href={`/resources/${encodeURIComponent(rep.resourceId)}`}
                         className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                       >
                         Inspect
@@ -1153,7 +1160,7 @@ export default function ModerationPortalPage() {
                         <button
                           type="button"
                           onClick={() => handleResolveReport(rep.id)}
-                          className="px-3.5 py-1.5 rounded-xl bg-[#00875A] hover:bg-[#00734c] text-white text-xs font-bold cursor-pointer"
+                          className="px-3.5 py-1.5 rounded-xl bg-brand-emerald hover:bg-brand-emerald-hover text-white text-xs font-bold cursor-pointer"
                         >
                           Mark Resolved
                         </button>
@@ -1168,127 +1175,15 @@ export default function ModerationPortalPage() {
 
         {/* TAB 2: USER ROLE MANAGEMENT (ADMIN ONLY) */}
         {activePortalTab === "users" && isAdmin && (
-          <div className="space-y-6">
-            <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900">
-                    Faculty Role & Privilege Administration
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Assign and regulate operational roles across all student accounts, faculty moderators, and system administrators.
-                  </p>
-                </div>
-
-                <div className="relative w-full sm:w-72">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Search name, email, department..."
-                    value={userSearchQuery}
-                    onChange={(e) => setUserSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
-                  />
-                </div>
-              </div>
-
-              {/* Roles explanation card */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 rounded-2xl bg-slate-50 border border-slate-200/80 mb-6 text-xs">
-                <div>
-                  <span className="font-bold text-slate-800">STUDENT:</span>
-                  <p className="text-slate-500 mt-0.5">
-                    Can access study vaults, download verified files, and submit materials into review.
-                  </p>
-                </div>
-                <div>
-                  <span className="font-bold text-emerald-800">MODERATOR:</span>
-                  <p className="text-slate-500 mt-0.5">
-                    Has review queue access to inspect, approve, and reject academic uploads.
-                  </p>
-                </div>
-                <div>
-                  <span className="font-bold text-purple-800">ADMIN:</span>
-                  <p className="text-slate-500 mt-0.5">
-                    Full platform governance, role allocation, and institutional configuration.
-                  </p>
-                </div>
-              </div>
-
-              {/* Users Directory Table */}
-              {usersLoading ? (
-                <div className="p-12 text-center">
-                  <Loader2 className="w-8 h-8 text-[#00875A] animate-spin mx-auto mb-3" />
-                  <p className="text-xs text-slate-500">Loading user registry...</p>
-                </div>
-              ) : filteredUsers.length === 0 ? (
-                <div className="p-12 text-center text-slate-400 text-xs">
-                  No registered users match your search query.
-                </div>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {filteredUsers.map((userItem) => (
-                    <div
-                      key={userItem.id}
-                      className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 overflow-hidden relative shrink-0">
-                          <Image
-                            src={userItem.avatar}
-                            alt={userItem.name}
-                            fill
-                            unoptimized
-                            className="object-cover"
-                          />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-xs sm:text-sm font-bold text-slate-900">
-                              {userItem.name}
-                            </h4>
-                            {userItem.id === currentUser.id && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-slate-100 text-slate-600">
-                                You
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[11px] text-slate-500">
-                            {userItem.email} • {userItem.department} ({userItem.level})
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Role Dropdown */}
-                      <div className="flex items-center gap-3 shrink-0">
-                        <label className="text-[11px] font-semibold text-slate-500">
-                          Assigned Role:
-                        </label>
-                        <select
-                          value={userItem.role}
-                          disabled={updatingUserId === userItem.id}
-                          onChange={(e) => handleRoleChange(userItem.id, e.target.value)}
-                          className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${
-                            userItem.role === "ADMIN"
-                              ? "bg-purple-50 text-purple-900 border-purple-300"
-                              : userItem.role === "MODERATOR"
-                              ? "bg-emerald-50 text-emerald-900 border-emerald-300"
-                              : "bg-slate-50 text-slate-800 border-slate-200"
-                          }`}
-                        >
-                          <option value="STUDENT">STUDENT (General)</option>
-                          <option value="MODERATOR">MODERATOR (Faculty Reviewer)</option>
-                          <option value="ADMIN">ADMIN (Full Authority)</option>
-                        </select>
-                        {updatingUserId === userItem.id && (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+          <UserManagementTab
+            users={filteredUsers}
+            currentUser={currentUser}
+            loading={usersLoading}
+            searchQuery={userSearchQuery}
+            onSearchChange={setUserSearchQuery}
+            updatingUserId={updatingUserId}
+            onRoleChange={handleRoleChange}
+          />
         )}
       </main>
 
@@ -1298,9 +1193,12 @@ export default function ModerationPortalPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="reject-modal-title"
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setRejectingItem(null);
+          }}
         >
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl animate-in zoom-in-95">
+          <div className="bg-surface border border-slate-200 rounded-3xl p-6 sm:p-8 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-[var(--shadow-modal)] animate-ui-scale">
             <div className="flex items-start justify-between gap-4 mb-4">
               <div>
                 <span className="text-[11px] font-extrabold uppercase px-2 py-0.5 rounded bg-rose-100 text-rose-800">
@@ -1308,7 +1206,7 @@ export default function ModerationPortalPage() {
                 </span>
                 <h3
                   id="reject-modal-title"
-                  className="text-lg font-bold text-slate-900 mt-1"
+                  className="text-lg font-bold text-brand-forest mt-1"
                 >
                   Reject Resource Submission
                 </h3>
@@ -1317,9 +1215,9 @@ export default function ModerationPortalPage() {
                 type="button"
                 aria-label="Close rejection dialog"
                 onClick={() => setRejectingItem(null)}
-                className="text-slate-400 hover:text-slate-700 cursor-pointer text-lg font-bold"
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 cursor-pointer"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 

@@ -326,12 +326,12 @@ export default function ResourceUploadPortal({
     return (
       <div className="bg-white border border-emerald-200 rounded-3xl p-6 sm:p-8 shadow-xs">
         <div className="text-center max-w-lg mx-auto py-4">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-100/80 text-[#00875A] flex items-center justify-center mx-auto mb-4 animate-in zoom-in-75">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-100/80 text-brand-emerald flex items-center justify-center mx-auto mb-4 animate-ui-scale">
             <CheckCircle2 className="w-8 h-8" />
           </div>
 
-          <h3 className="text-xl font-bold text-slate-900 mb-1">
-            {isVid ? "Video Tutorial Submitted!" : "PDF Document Submitted!"}
+          <h3 className="text-xl font-bold text-brand-forest mb-1">
+            {isVid ? "Video Tutorial Submitted!" : "Document Submitted!"}
           </h3>
           <p className="text-xs sm:text-sm text-slate-600 mb-6 leading-relaxed">
             Your material <strong className="text-slate-800">{successSubmission.title}</strong> has been received and added to your submission records.
@@ -426,13 +426,17 @@ export default function ResourceUploadPortal({
       </div>
 
       {errorMessage && (
-        <div className="mt-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 flex items-start gap-2.5 text-xs animate-in fade-in">
+        <div
+          role="alert"
+          className="mt-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 flex items-start gap-2.5 text-xs animate-ui-fade"
+        >
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
           <div className="flex-1 font-medium">{errorMessage}</div>
           <button
             type="button"
+            aria-label="Dismiss error"
             onClick={() => setErrorMessage("")}
-            className="text-rose-400 hover:text-rose-600 cursor-pointer"
+            className="text-rose-500 hover:text-rose-700 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -451,29 +455,29 @@ export default function ResourceUploadPortal({
             onClick={() => handleMediumChange("PDF")}
             className={`p-4 rounded-2xl border text-left transition-all cursor-pointer flex items-start gap-3.5 ${
               medium === "PDF"
-                ? "border-[#00875A] bg-emerald-50/50 shadow-2xs ring-2 ring-[#00875A]/20"
+                ? "border-brand-emerald bg-emerald-50/50 shadow-2xs ring-2 ring-brand-emerald/20"
                 : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/60"
             }`}
           >
             <div
               className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                 medium === "PDF"
-                  ? "bg-[#00875A] text-white shadow-2xs"
+                  ? "bg-brand-emerald text-white shadow-2xs"
                   : "bg-slate-100 text-slate-600"
               }`}
             >
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                 <span>Document or Slides</span>
                 {medium === "PDF" && (
-                  <span className="text-[10px] font-semibold text-[#00875A] bg-emerald-100 px-1.5 py-0.2 rounded-md">
+                  <span className="text-[10px] font-semibold text-brand-emerald bg-emerald-100 px-1.5 py-0.5 rounded-md">
                     Selected
                   </span>
                 )}
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+              <p className="text-xs text-slate-600 mt-0.5 leading-snug">
                 Upload past questions, lecture handouts, slides, summaries, or notes (up to 30MB).
               </p>
             </div>
@@ -499,15 +503,15 @@ export default function ResourceUploadPortal({
               <YoutubeIcon className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                 <span>YouTube Video Tutorial</span>
                 {medium === "YOUTUBE" && (
-                  <span className="text-[10px] font-semibold text-red-700 bg-red-100 px-1.5 py-0.2 rounded-md">
+                  <span className="text-[10px] font-semibold text-red-700 bg-red-100 px-1.5 py-0.5 rounded-md">
                     Selected
                   </span>
                 )}
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+              <p className="text-xs text-slate-600 mt-0.5 leading-snug">
                 Submit curated YouTube video lectures, lab experiments, or solved engineering problem videos.
               </p>
             </div>
@@ -534,24 +538,32 @@ export default function ResourceUploadPortal({
 
             {!file ? (
               <div
+                role="button"
+                tabIndex={0}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
                 className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center cursor-pointer transition-all ${
                   isDragging
-                    ? "border-[#00875A] bg-emerald-50/60 scale-[1.01]"
-                    : "border-slate-300 hover:border-[#00875A] hover:bg-slate-50/70"
+                    ? "border-brand-emerald bg-emerald-50/60 scale-[1.01]"
+                    : "border-slate-300 hover:border-brand-emerald hover:bg-slate-50/70"
                 }`}
               >
-                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-[#00875A] flex items-center justify-center mx-auto mb-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-brand-emerald flex items-center justify-center mx-auto mb-3">
                   <UploadCloud className="w-6 h-6" />
                 </div>
                 <p className="text-xs sm:text-sm font-semibold text-slate-800">
                   Click to browse or drag and drop your document or slides here
                 </p>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Accepted formats: <strong className="text-slate-600">PDF, Word (DOC/DOCX), Slides (PPT/PPTX), Text</strong> (Maximum file size: 30MB)
+                <p className="text-xs text-slate-500 mt-1">
+                  Accepted formats: <strong className="text-slate-700">PDF, Word (DOC/DOCX), Slides (PPT/PPTX), Text</strong> (Maximum file size: 30MB)
                 </p>
               </div>
             ) : (
@@ -603,7 +615,7 @@ export default function ResourceUploadPortal({
 
             {/* Live YouTube Preview Card */}
             {detectedVideoId ? (
-              <div className="p-3.5 rounded-2xl border border-red-200 bg-red-50/30 flex flex-col sm:flex-row items-center gap-4 animate-in fade-in">
+              <div className="p-3.5 rounded-2xl border border-red-200 bg-red-50/30 flex flex-col sm:flex-row items-center gap-4 animate-ui-fade">
                 <div className="relative w-full sm:w-44 aspect-video rounded-xl overflow-hidden bg-slate-900 shrink-0 shadow-xs group">
                   <Image
                     src={`https://img.youtube.com/vi/${detectedVideoId}/hqdefault.jpg`}
@@ -704,7 +716,7 @@ export default function ResourceUploadPortal({
             </select>
           </div>
 
-          <div className="grid grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Level <span className="text-rose-500">*</span>
@@ -807,20 +819,20 @@ export default function ResourceUploadPortal({
 
         {/* Progress Bar when uploading */}
         {isSubmitting && (
-          <div className="space-y-2 animate-in fade-in">
+          <div className="space-y-2 animate-ui-fade">
             <div className="flex items-center justify-between text-xs text-slate-600 font-medium">
               <span className="flex items-center gap-1.5 text-emerald-800">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#00875A]" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-emerald" />
                 {medium === "YOUTUBE"
                   ? "Verifying and registering YouTube tutorial..."
-                  : "Uploading PDF to Faculty Vault..."}
+                  : "Uploading document to Faculty Vault..."}
               </span>
               <span>{uploadProgress}%</span>
             </div>
             <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
               <div
                 className={`h-full transition-all duration-300 rounded-full ${
-                  medium === "YOUTUBE" ? "bg-red-600" : "bg-[#00875A]"
+                  medium === "YOUTUBE" ? "bg-red-600" : "bg-brand-emerald"
                 }`}
                 style={{ width: `${uploadProgress}%` }}
               />
@@ -829,9 +841,9 @@ export default function ResourceUploadPortal({
         )}
 
         {/* Action Button */}
-        <div className="pt-2 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+        <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <Sparkles className="w-3.5 h-3.5 text-brand-emerald shrink-0" />
             <span>Materials undergo faculty quality check before publishing</span>
           </div>
 
@@ -842,10 +854,10 @@ export default function ResourceUploadPortal({
               (medium === "PDF" && !file) ||
               (medium === "YOUTUBE" && (!youtubeUrl || !detectedVideoId))
             }
-            className={`px-6 py-2.5 rounded-xl text-white text-xs sm:text-sm font-semibold transition-all shadow-sm hover:shadow cursor-pointer flex items-center gap-2 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`w-full sm:w-auto justify-center px-6 py-2.5 rounded-xl text-white text-xs sm:text-sm font-semibold transition-colors shadow-xs cursor-pointer flex items-center gap-2 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
               medium === "YOUTUBE"
                 ? "bg-red-600 hover:bg-red-700"
-                : "bg-[#00875A] hover:bg-[#00734c]"
+                : "bg-brand-emerald hover:bg-brand-emerald-hover"
             }`}
           >
             {isSubmitting ? (

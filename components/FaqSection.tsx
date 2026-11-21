@@ -10,7 +10,6 @@ interface FaqItem {
 }
 
 export default function FaqSection() {
-  // First item open by default as shown in mockup
   const [openId, setOpenId] = useState<string | null>("faq-1");
 
   const faqs: FaqItem[] = [
@@ -57,14 +56,14 @@ export default function FaqSection() {
   };
 
   return (
-    <section id="faqs" className="py-16 md:py-24 bg-white border-t border-slate-100">
+    <section id="faqs" className="py-16 md:py-24 bg-surface border-t border-slate-200/70">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section Header */}
         <div className="text-center mb-12">
-          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
+          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-brand-forest">
             Frequently Asked Questions
           </h2>
-          <p className="mt-2 text-sm sm:text-base text-slate-500">
+          <p className="mt-2.5 text-sm sm:text-base text-slate-600">
             Find answers to common questions about using The NUESA Library for your engineering studies.
           </p>
         </div>
@@ -76,28 +75,42 @@ export default function FaqSection() {
             return (
               <div
                 key={faq.id}
-                className="border border-slate-200/90 rounded-xl overflow-hidden transition-all bg-white hover:border-slate-300"
+                className={`border rounded-2xl overflow-hidden transition-colors bg-surface ${
+                  isOpen
+                    ? "border-emerald-200 shadow-2xs"
+                    : "border-slate-200/90 hover:border-slate-300"
+                }`}
               >
                 <button
                   type="button"
                   onClick={() => toggleFaq(faq.id)}
-                  className="w-full py-4 px-5 sm:px-6 text-left flex items-center justify-between gap-4 cursor-pointer focus:outline-none"
+                  className="w-full py-4 px-5 sm:px-6 text-left flex items-center justify-between gap-4 cursor-pointer rounded-2xl"
                   aria-expanded={isOpen}
+                  aria-controls={`${faq.id}-panel`}
                 >
-                  <span className="text-sm sm:text-base font-semibold text-slate-900">
+                  <span className="text-sm sm:text-base font-bold text-brand-forest">
                     {faq.question}
                   </span>
-                  <span className="shrink-0 text-emerald-600">
+                  <span
+                    className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                      isOpen
+                        ? "bg-brand-emerald text-white"
+                        : "bg-emerald-50 text-brand-emerald"
+                    }`}
+                  >
                     {isOpen ? (
                       <Minus className="w-4 h-4" />
                     ) : (
-                      <Plus className="w-4 h-4 text-emerald-600" />
+                      <Plus className="w-4 h-4" />
                     )}
                   </span>
                 </button>
 
                 {isOpen && (
-                  <div className="px-5 sm:px-6 pb-5 pt-1 text-xs sm:text-sm text-slate-600 leading-relaxed border-t border-slate-100/70">
+                  <div
+                    id={`${faq.id}-panel`}
+                    className="px-5 sm:px-6 pb-5 pt-3 text-sm text-slate-600 leading-relaxed border-t border-slate-100 animate-ui-fade"
+                  >
                     {faq.answer}
                   </div>
                 )}

@@ -3,10 +3,10 @@
 import { Suspense, useState, useEffect, useMemo, useDeferredValue } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ResourceViewerModal from "@/components/ResourceViewerModal";
+import ResourceCard, { ResourceCardSkeleton } from "@/components/ResourceCard";
 import { DEPARTMENTS, getDepartmentBySlug, isKnownDepartment } from "@/lib/departments";
 import { resolveCourseMetadata } from "@/lib/courses";
 import {
@@ -14,7 +14,6 @@ import {
   normalizeMaterial,
   shareOrCopyMaterialLink,
 } from "@/lib/saved-client";
-import { getResourceBadgeStyle } from "@/lib/badge-styles";
 import {
   cacheCatalogResources,
   getCachedCatalogResources,
@@ -24,18 +23,13 @@ import {
   Search,
   FileText,
   Play,
-  Download,
   Bookmark,
   CheckCircle2,
-  ExternalLink,
   Layers,
   Loader2,
   ArrowRight,
-  Eye,
   RotateCcw,
   HardDriveDownload,
-  Share2,
-  Check,
   Clock,
   MessageSquarePlus,
   X,
@@ -559,22 +553,22 @@ function ResourcesCatalogContent() {
                     }
                     setShowRequestModal(true);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition-all shadow-2xs cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 bg-surface hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition-colors shadow-2xs cursor-pointer"
                 >
-                  <MessageSquarePlus className="w-4 h-4 text-[#00875A]" />
+                  <MessageSquarePlus className="w-4 h-4 text-brand-emerald" />
                   <span>Request Material</span>
                 </button>
               )}
               <Link
                 href="/saved"
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition-all shadow-2xs"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 bg-surface hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition-colors shadow-2xs"
               >
-                <Bookmark className="w-4 h-4 text-[#00875A]" />
+                <Bookmark className="w-4 h-4 text-brand-emerald" />
                 <span>Saved ({savedCount})</span>
               </Link>
               <Link
                 href="/upload"
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-[#00875A] hover:bg-[#00734c] text-white text-xs sm:text-sm font-semibold transition-all shadow-xs"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand-emerald hover:bg-brand-emerald-hover text-white text-xs sm:text-sm font-semibold transition-colors shadow-xs"
               >
                 <span>Contribute Material</span>
                 <ArrowRight className="w-4 h-4" />
@@ -583,25 +577,27 @@ function ResourcesCatalogContent() {
           </div>
 
           {/* Search & Dropdown Filters */}
-          <div className="mt-8 pt-6 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
-            <div className="relative lg:col-span-2">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <div className="mt-7 pt-6 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-12 gap-3">
+            <div className="relative sm:col-span-2 lg:col-span-6 xl:col-span-4">
+              <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
+                aria-label="Search materials by course code, name, or topic"
                 placeholder="Search course code, course name, topic..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald transition-all"
               />
             </div>
 
             <select
+              aria-label="Filter by department"
               value={selectedDept}
               onChange={(e) => {
                 setSelectedDept(e.target.value);
                 setSelectedCourse("All Courses");
               }}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+              className="w-full lg:col-span-2 xl:col-span-2 px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
             >
               <option value="All Departments">All Departments</option>
               {DEPARTMENTS.map((dept) => (
@@ -612,12 +608,13 @@ function ResourcesCatalogContent() {
             </select>
 
             <select
+              aria-label="Filter by academic level"
               value={selectedLevel}
               onChange={(e) => {
                 setSelectedLevel(e.target.value);
                 setSelectedCourse("All Courses");
               }}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+              className="w-full lg:col-span-1 xl:col-span-1 px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
             >
               {LEVELS.map((lvl) => (
                 <option key={lvl} value={lvl}>
@@ -627,12 +624,13 @@ function ResourcesCatalogContent() {
             </select>
 
             <select
+              aria-label="Filter by semester"
               value={selectedSemester}
               onChange={(e) => {
                 setSelectedSemester(e.target.value);
                 setSelectedCourse("All Courses");
               }}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+              className="w-full lg:col-span-1 xl:col-span-2 px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
             >
               {SEMESTERS.map((sem) => (
                 <option key={sem} value={sem}>
@@ -642,9 +640,10 @@ function ResourcesCatalogContent() {
             </select>
 
             <select
+              aria-label="Filter by course code"
               value={selectedCourse}
               onChange={(e) => setSelectedCourse(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+              className="w-full lg:col-span-1 xl:col-span-2 px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
             >
               <option value="All Courses">All Courses ({availableCourses.length})</option>
               {availableCourses.map((c) => (
@@ -655,18 +654,19 @@ function ResourcesCatalogContent() {
             </select>
 
             <select
+              aria-label="Filter by media format"
               value={selectedMedium}
               onChange={(e) =>
                 setSelectedMedium(
                   e.target.value as "ALL" | "PDF" | "YOUTUBE" | "OFFLINE"
                 )
               }
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+              className="w-full lg:col-span-1 xl:col-span-1 px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
             >
               <option value="ALL">All Formats</option>
-              <option value="PDF">PDF Documents</option>
-              <option value="YOUTUBE">Video Lectures</option>
-              <option value="OFFLINE">Downloaded ({offlineCount})</option>
+              <option value="PDF">Documents</option>
+              <option value="YOUTUBE">Videos</option>
+              <option value="OFFLINE">Offline ({offlineCount})</option>
             </select>
           </div>
         </div>
@@ -714,11 +714,11 @@ function ResourcesCatalogContent() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-bold font-mono text-[#0C3B2E]">
+                        <span className="text-[11px] font-bold font-mono text-brand-forest">
                           {recent.courseCode}
                         </span>
                         {isOfflineAvailable(rid) && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-[#00875A]">
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-brand-emerald">
                             Offline
                           </span>
                         )}
@@ -736,7 +736,7 @@ function ResourcesCatalogContent() {
 
         {/* Categories, Course Pack Offline Button & Sort Row */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-6">
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
             {CATEGORIES.map((cat) => (
               <button
                 key={cat}
@@ -789,13 +789,13 @@ function ResourcesCatalogContent() {
               </button>
             )}
 
-            <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1">
-              <ArrowUpDown className="w-3 h-3 text-slate-400" />
+            <div className="inline-flex items-center gap-1.5 bg-surface border border-slate-200 rounded-xl px-2.5 py-1.5 focus-within:border-brand-emerald focus-within:ring-2 focus-within:ring-brand-emerald/15">
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as SortOption)}
                 aria-label="Sort course materials"
-                className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none cursor-pointer"
+                className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none focus-visible:outline-none cursor-pointer"
               >
                 <option value="newest">Newest First</option>
                 <option value="popular">Most Downloaded</option>
@@ -813,7 +813,7 @@ function ResourcesCatalogContent() {
               <button
                 type="button"
                 onClick={resetAllFilters}
-                className="inline-flex items-center gap-1 text-[#00875A] font-semibold hover:underline cursor-pointer"
+                className="inline-flex items-center gap-1 text-brand-emerald font-semibold hover:underline cursor-pointer"
               >
                 <RotateCcw className="w-3 h-3" />
                 <span>Reset</span>
@@ -824,19 +824,23 @@ function ResourcesCatalogContent() {
 
         {/* Resources Grid */}
         {loading ? (
-          <div className="bg-white border border-slate-200 rounded-3xl p-16 text-center">
-            <Loader2 className="w-8 h-8 text-[#00875A] animate-spin mx-auto mb-3" />
-            <p className="text-xs text-slate-500 font-medium">Loading course materials...</p>
+          <div
+            aria-label="Loading course materials"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+          >
+            {[1, 2, 3, 4, 5, 6].map((idx) => (
+              <ResourceCardSkeleton key={idx} />
+            ))}
           </div>
         ) : filteredResources.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-3xl p-16 text-center">
-            <FileText className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-            <h3 className="text-base font-bold text-[#0C3B2E] mb-1">
+          <div className="bg-surface border border-dashed border-slate-300 rounded-3xl p-12 sm:p-16 text-center">
+            <FileText className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+            <h3 className="text-base sm:text-lg font-bold text-brand-forest mb-1.5">
               {selectedMedium === "OFFLINE"
                 ? "No downloaded documents yet"
                 : "No course materials found"}
             </h3>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto mb-5">
+            <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto mb-6 leading-relaxed">
               {selectedMedium === "OFFLINE"
                 ? "Click Download on any handout, past question, or document to save it into your offline vault for reading without internet."
                 : hasActiveFilters
@@ -850,7 +854,7 @@ function ResourcesCatalogContent() {
                 <button
                   type="button"
                   onClick={resetAllFilters}
-                  className="px-4 py-2.5 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 bg-surface hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer transition-colors"
                 >
                   Clear Filters
                 </button>
@@ -865,14 +869,14 @@ function ResourcesCatalogContent() {
                       }
                       setShowRequestModal(true);
                     }}
-                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-[#0C3B2E] text-xs font-semibold cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-brand-forest text-xs font-semibold cursor-pointer transition-colors"
                   >
-                    <MessageSquarePlus className="w-3.5 h-3.5 text-[#00875A]" />
+                    <MessageSquarePlus className="w-3.5 h-3.5 text-brand-emerald" />
                     <span>Request This Material</span>
                   </button>
                   <Link
                     href="/upload"
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-[#00875A] hover:bg-[#00734c] text-white text-xs font-semibold"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-emerald hover:bg-brand-emerald-hover text-white text-xs font-semibold transition-colors"
                   >
                     <span>Submit Material</span>
                   </Link>
@@ -882,219 +886,24 @@ function ResourcesCatalogContent() {
           </div>
         ) : (
           <div className="space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredResources.map((item) => {
                 const canonicalId = item.resourceId || item.id;
-                const isVideo = item.medium === "YOUTUBE";
-                const bookmarked = isSaved(canonicalId);
-                const cachedOffline = isOfflineAvailable(canonicalId);
-                const isDownloading = downloadingIds.has(canonicalId);
-                const badge = getResourceBadgeStyle(item);
-                const courseMeta = resolveCourseMetadata(item.courseCode, {
-                  department: item.department,
-                  level: item.level,
-                  semester: item.semester,
-                });
-                const canDownloadPdf = !isVideo && (Boolean(item.fileUrl) || cachedOffline);
-
                 return (
-                  <div
+                  <ResourceCard
                     key={canonicalId}
-                    className="bg-white border border-slate-200/90 hover:border-slate-300 rounded-2xl p-6 shadow-xs hover:shadow-md transition-all flex flex-col justify-between group"
-                  >
-                    <div>
-                      {/* Top Row: Resource Type Pill + Course Code + Top-Right Bookmark Icon */}
-                      <div className="flex items-start justify-between gap-2 mb-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span
-                            className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold tracking-wider uppercase ${badge.className}`}
-                          >
-                            {badge.label}
-                          </span>
-
-                          <span className="px-2 py-0.5 rounded-md bg-[#0C3B2E] text-white text-[11px] font-bold uppercase font-mono">
-                            {item.courseCode}
-                          </span>
-
-                          {item.sessionYear && (
-                            <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/80 text-[10px] font-bold">
-                              {item.sessionYear}
-                            </span>
-                          )}
-
-                          {cachedOffline && (
-                            <span
-                              title="Stored in browser IndexedDB for offline viewing"
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-[#00875A] border border-emerald-200 text-[10px] font-bold"
-                            >
-                              <HardDriveDownload className="w-3 h-3" />
-                              <span>Offline</span>
-                            </span>
-                          )}
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleToggleBookmark(item)}
-                          disabled={togglingId === canonicalId}
-                          aria-label={bookmarked ? "Remove from Saved" : "Save resource"}
-                          title={bookmarked ? "Remove from Saved" : "Bookmark to Saved"}
-                          className="p-1.5 -mr-1.5 -mt-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
-                        >
-                          {togglingId === canonicalId ? (
-                            <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
-                          ) : bookmarked ? (
-                            <Bookmark className="h-5 w-5 fill-slate-900 text-slate-900" />
-                          ) : (
-                            <Bookmark
-                              className="h-5 w-5 text-slate-500 hover:text-slate-800"
-                              strokeWidth={1.8}
-                            />
-                          )}
-                        </button>
-                      </div>
-
-                      {/* Clickable YouTube Thumbnail */}
-                      {isVideo && item.youtubeVideoId && !isOffline && (
-                        <button
-                          type="button"
-                          onClick={() => setActiveMaterial(item)}
-                          className="relative w-full aspect-video rounded-xl overflow-hidden bg-slate-900 mb-3 group/thumb block cursor-pointer text-left"
-                          aria-label={`Watch ${item.title}`}
-                        >
-                          <Image
-                            src={
-                              item.thumbnailUrl ||
-                              `https://img.youtube.com/vi/${item.youtubeVideoId}/hqdefault.jpg`
-                            }
-                            alt={item.title}
-                            fill
-                            sizes="(max-width: 768px) 100vw, 33vw"
-                            className="object-cover"
-                          />
-                          <div className="absolute inset-0 bg-black/25 flex items-center justify-center group-hover/thumb:bg-black/40 transition-colors">
-                            <div className="w-10 h-10 rounded-full bg-red-600 text-white flex items-center justify-center shadow-md group-hover/thumb:scale-105 transition-transform">
-                              <Play className="w-4 h-4 fill-white ml-0.5" />
-                            </div>
-                          </div>
-                        </button>
-                      )}
-
-                      {/* Course Name Subtitle */}
-                      <div className="text-[11px] font-semibold text-[#00875A] mb-1 line-clamp-1">
-                        {courseMeta.title}
-                      </div>
-
-                      {/* Material Title (opens Reader / Video Player) */}
-                      <button
-                        type="button"
-                        onClick={() => setActiveMaterial(item)}
-                        className="text-left block w-full cursor-pointer"
-                      >
-                        <h3 className="text-base sm:text-lg font-bold text-[#0C3B2E] group-hover:text-[#00875A] transition-colors leading-snug mb-1.5 line-clamp-2">
-                          {item.title}
-                        </h3>
-                      </button>
-
-                      {item.description && (
-                        <p className="text-xs sm:text-sm text-slate-500 line-clamp-2 mb-3 leading-relaxed">
-                          {item.description}
-                        </p>
-                      )}
-
-                      <div className="flex items-center gap-2 text-xs text-slate-400 flex-wrap">
-                        <span className="truncate max-w-[160px]">{item.department}</span>
-                        {item.level && (
-                          <>
-                            <span>&bull;</span>
-                            <span className="shrink-0">{item.level}</span>
-                          </>
-                        )}
-                        <span>&bull;</span>
-                        <span className="shrink-0">{item.fileSize || "Free Access"}</span>
-                      </div>
-                    </div>
-
-                    {/* Action Bar: Read / Watch, Share, Download */}
-                    <div className="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setActiveMaterial(item)}
-                        className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                          isVideo
-                            ? "bg-[#DBEAFE]/60 hover:bg-[#DBEAFE] text-[#2563EB]"
-                            : "bg-emerald-50 hover:bg-emerald-100 text-[#00875A]"
-                        }`}
-                      >
-                        {isVideo ? (
-                          <>
-                            <Play className="w-3.5 h-3.5 fill-current" />
-                            <span>Watch</span>
-                          </>
-                        ) : (
-                          <>
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>{cachedOffline ? "Read Offline" : "Read"}</span>
-                          </>
-                        )}
-                      </button>
-
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleShare(item)}
-                          title="Share or copy direct link"
-                          className="p-2 rounded-xl border border-slate-200 text-slate-500 hover:text-[#00875A] hover:border-emerald-200 hover:bg-emerald-50/50 transition-colors cursor-pointer"
-                        >
-                          {copiedId === canonicalId ? (
-                            <Check className="w-3.5 h-3.5 text-[#00875A]" />
-                          ) : (
-                            <Share2 className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-
-                        {canDownloadPdf ? (
-                          <button
-                            type="button"
-                            disabled={isDownloading}
-                            onClick={() => handleDownload(item)}
-                            className={`inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer disabled:opacity-60 ${
-                              cachedOffline
-                                ? "bg-emerald-50 border border-emerald-200 text-[#0C3B2E] hover:bg-emerald-100"
-                                : "bg-[#0C3B2E] hover:bg-[#0A251D] text-white"
-                            }`}
-                            title={
-                              cachedOffline
-                                ? "Available offline — click to save another PDF copy"
-                                : "Download PDF & save for offline viewing"
-                            }
-                          >
-                            {isDownloading ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : cachedOffline ? (
-                              <HardDriveDownload className="w-3.5 h-3.5 text-[#00875A]" />
-                            ) : (
-                              <Download className="w-3.5 h-3.5" />
-                            )}
-                            <span>{cachedOffline ? "Downloaded" : "Download"}</span>
-                          </button>
-                        ) : (
-                          item.youtubeUrl &&
-                          !isOffline && (
-                            <a
-                              href={item.youtubeUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-slate-900 transition-all"
-                              title="Open on YouTube"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5" />
-                            </a>
-                          )
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                    item={item}
+                    isBookmarked={isSaved(canonicalId)}
+                    isCachedOffline={isOfflineAvailable(canonicalId)}
+                    isDownloading={downloadingIds.has(canonicalId)}
+                    isTogglingBookmark={togglingId === canonicalId}
+                    isCopied={copiedId === canonicalId}
+                    isOfflineMode={isOffline}
+                    onOpen={setActiveMaterial}
+                    onToggleBookmark={handleToggleBookmark}
+                    onDownload={handleDownload}
+                    onShare={handleShare}
+                  />
                 );
               })}
             </div>
@@ -1149,7 +958,7 @@ function ResourcesCatalogContent() {
             if (e.target === e.currentTarget) setShowRequestModal(false);
           }}
         >
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl">
+          <div className="bg-surface border border-slate-200 rounded-3xl p-6 sm:p-8 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-[var(--shadow-modal)] animate-ui-scale">
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#00875A]">

@@ -19,8 +19,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   if (!resource || resource.status !== "APPROVED") {
     return {
-      title: "Course Material — NUESApedia",
-      description: "Digital academic repository for Nigerian Universities Engineering Students' Association.",
+      title: "Course Material — The NUESA Library",
+      description: "Digital faculty library for FUOYE Engineering course materials.",
     };
   }
 
@@ -30,7 +30,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     semester: resource.semester,
   });
 
-  const title = `${resource.courseCode}: ${resource.title} — NUESApedia`;
+  const title = `${resource.courseCode}: ${resource.title} — The NUESA Library`;
   const description =
     resource.description ||
     `${resource.type} for ${resource.courseCode} (${courseMeta.title}), ${resource.department}, ${resource.level}.`;

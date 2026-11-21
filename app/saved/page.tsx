@@ -3,10 +3,10 @@
 import { Suspense, useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ResourceViewerModal from "@/components/ResourceViewerModal";
+import ResourceCard, { ResourceCardSkeleton } from "@/components/ResourceCard";
 import { DEPARTMENTS } from "@/lib/departments";
 import { resolveCourseMetadata } from "@/lib/courses";
 import {
@@ -14,7 +14,6 @@ import {
   normalizeMaterial,
   shareOrCopyMaterialLink,
 } from "@/lib/saved-client";
-import { getResourceBadgeStyle } from "@/lib/badge-styles";
 import {
   getCachedCatalogResources,
   formatBytes,
@@ -23,18 +22,12 @@ import { useSavedResources } from "@/context/SavedResourcesContext";
 import {
   Bookmark,
   BookmarkX,
-  Play,
-  Download,
   Trash2,
   Search,
   BookOpen,
   Loader2,
-  ExternalLink,
   CheckCircle2,
-  Eye,
   HardDriveDownload,
-  Share2,
-  Check,
   X,
 } from "lucide-react";
 
@@ -326,9 +319,13 @@ function SavedVaultContent() {
 
         {/* Loading State */}
         {loading && (
-          <div className="py-24 text-center">
-            <Loader2 className="w-8 h-8 text-[#00875A] animate-spin mx-auto mb-3" />
-            <p className="text-sm text-slate-500">Loading your saved &amp; downloaded materials...</p>
+          <div
+            aria-label="Loading saved and downloaded materials"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+          >
+            {[1, 2, 3].map((idx) => (
+              <ResourceCardSkeleton key={idx} />
+            ))}
           </div>
         )}
 
@@ -336,25 +333,27 @@ function SavedVaultContent() {
         {!loading && (
           <>
             {combinedItems.length > 0 && (
-              <div className="mb-8 flex flex-col lg:flex-row gap-4 justify-between items-stretch lg:items-center bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
+              <div className="mb-8 flex flex-col lg:flex-row gap-4 justify-between items-stretch lg:items-center bg-surface p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
                 {/* Search */}
                 <div className="relative flex-1 max-w-md">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                   <input
                     type="text"
+                    aria-label="Filter saved materials by course code, title, or department"
                     placeholder="Filter by course code, title, or department..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00875A]/20 focus:border-[#00875A] transition-all"
+                    className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm bg-surface-subtle focus:bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald transition-all"
                   />
                 </div>
 
                 {/* Department & Type Controls */}
                 <div className="flex flex-wrap items-center gap-3">
                   <select
+                    aria-label="Filter saved materials by department"
                     value={selectedDept}
                     onChange={(e) => setSelectedDept(e.target.value)}
-                    className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+                    className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold bg-surface text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
                   >
                     <option value="All">All Departments</option>
                     {DEPARTMENTS.map((dept) => (
@@ -370,7 +369,7 @@ function SavedVaultContent() {
                       onClick={() => setSelectedType("All")}
                       className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                         selectedType === "All"
-                          ? "bg-white text-[#0C3B2E] shadow-2xs"
+                          ? "bg-surface text-brand-forest shadow-2xs"
                           : "text-slate-600 hover:text-slate-900"
                       }`}
                     >
@@ -381,7 +380,7 @@ function SavedVaultContent() {
                       onClick={() => setSelectedType("Offline")}
                       className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                         selectedType === "Offline"
-                          ? "bg-[#00875A] text-white shadow-2xs"
+                          ? "bg-brand-emerald text-white shadow-2xs"
                           : "text-slate-600 hover:text-slate-900"
                       }`}
                     >
@@ -393,7 +392,7 @@ function SavedVaultContent() {
                       onClick={() => setSelectedType("PDF")}
                       className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                         selectedType === "PDF"
-                          ? "bg-white text-[#0C3B2E] shadow-2xs"
+                          ? "bg-surface text-brand-forest shadow-2xs"
                           : "text-slate-600 hover:text-slate-900"
                       }`}
                     >
@@ -404,7 +403,7 @@ function SavedVaultContent() {
                       onClick={() => setSelectedType("Video")}
                       className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                         selectedType === "Video"
-                          ? "bg-white text-[#0C3B2E] shadow-2xs"
+                          ? "bg-surface text-brand-forest shadow-2xs"
                           : "text-slate-600 hover:text-slate-900"
                       }`}
                     >
@@ -417,18 +416,18 @@ function SavedVaultContent() {
 
             {/* Empty Saved State */}
             {combinedItems.length === 0 && (
-              <div className="py-20 text-center bg-white rounded-3xl border border-dashed border-slate-300 p-8">
-                <Bookmark className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                <h3 className="text-lg font-bold text-[#0C3B2E]">
+              <div className="py-20 text-center bg-surface rounded-3xl border border-dashed border-slate-300 p-8">
+                <Bookmark className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+                <h3 className="text-lg font-bold text-brand-forest">
                   No Saved or Downloaded Materials Yet
                 </h3>
-                <p className="mt-1 text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
+                <p className="mt-1.5 text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
                   Browse the Resources page and click Bookmark or Download on any lecture handout, past question, textbook, or video lecture. Downloaded PDFs stay readable even offline.
                 </p>
                 <div className="mt-6 flex items-center justify-center gap-3">
                   <Link
                     href="/resources"
-                    className="px-5 py-2.5 rounded-xl bg-[#00875A] hover:bg-[#00734c] text-white text-xs font-bold shadow-2xs"
+                    className="px-5 py-2.5 rounded-xl bg-brand-emerald hover:bg-brand-emerald-hover text-white text-xs sm:text-sm font-semibold shadow-2xs transition-colors"
                   >
                     Browse Resources
                   </Link>
@@ -438,14 +437,14 @@ function SavedVaultContent() {
 
             {/* Filtered Empty State */}
             {combinedItems.length > 0 && filteredItems.length === 0 && (
-              <div className="py-16 text-center bg-white rounded-2xl border border-slate-200 p-8">
-                <BookmarkX className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                <h3 className="text-base font-bold text-[#0C3B2E]">
+              <div className="py-16 text-center bg-surface rounded-2xl border border-slate-200 p-8">
+                <BookmarkX className="w-10 h-10 text-slate-400 mx-auto mb-2.5" />
+                <h3 className="text-base font-bold text-brand-forest">
                   {selectedType === "Offline"
                     ? "No downloaded offline documents yet"
                     : "No matching saved items"}
                 </h3>
-                <p className="mt-1 text-xs text-slate-400 max-w-sm mx-auto">
+                <p className="mt-1 text-xs sm:text-sm text-slate-600 max-w-sm mx-auto">
                   {selectedType === "Offline"
                     ? "Click Download on any PDF document to store it on this device for offline reading."
                     : "Try clearing your search query or resetting your filters."}
@@ -457,7 +456,7 @@ function SavedVaultContent() {
                     setSelectedDept("All");
                     setSelectedType("All");
                   }}
-                  className="mt-4 px-4 py-1.5 rounded-lg bg-slate-100 text-xs font-semibold text-slate-700 hover:bg-slate-200 cursor-pointer"
+                  className="mt-4 px-4 py-2 rounded-xl bg-slate-100 text-xs font-semibold text-slate-700 hover:bg-slate-200 cursor-pointer transition-colors"
                 >
                   Show All Saved Items
                 </button>
@@ -469,220 +468,32 @@ function SavedVaultContent() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredItems.map((item) => {
                   const targetId = item.resourceId || item.id;
-                  const isVideo = item.medium === "YOUTUBE";
-                  const bookmarked = isSaved(targetId);
-                  const cachedOffline = isOfflineAvailable(targetId);
-                  const isDownloading = downloadingIds.has(targetId);
-                  const badge = getResourceBadgeStyle(item);
-                  const courseMeta = resolveCourseMetadata(item.courseCode, {
-                    department: item.department,
-                    level: item.level,
-                    semester: item.semester,
-                  });
-                  const canDownloadPdf = !isVideo && (Boolean(item.fileUrl) || cachedOffline);
-
                   return (
-                    <div
+                    <ResourceCard
                       key={targetId}
-                      className="bg-white rounded-2xl border border-slate-200/90 hover:border-slate-300 shadow-xs hover:shadow-md transition-all flex flex-col justify-between p-6 group"
-                    >
-                      <div>
-                        {/* Course & Type Badges + Top-Right Bookmark */}
-                        <div className="flex items-start justify-between gap-2 mb-3">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold tracking-wider uppercase ${badge.className}`}
-                            >
-                              {badge.label}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-md bg-[#0C3B2E] text-white font-mono text-[11px] font-bold">
-                              {item.courseCode}
-                            </span>
-                            {cachedOffline && (
-                              <span
-                                title="Stored in browser IndexedDB for offline viewing"
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-[#00875A] border border-emerald-200 text-[10px] font-bold"
-                              >
-                                <HardDriveDownload className="w-3 h-3" />
-                                <span>Available Offline</span>
-                              </span>
-                            )}
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => handleToggleBookmark(item)}
-                            disabled={busyId === targetId}
-                            aria-label={bookmarked ? "Remove bookmark" : "Bookmark resource"}
-                            title={bookmarked ? "Bookmarked" : "Bookmark to Saved"}
-                            className="p-1.5 -mr-1.5 -mt-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
-                          >
-                            {bookmarked ? (
-                              <Bookmark className="h-5 w-5 fill-slate-900 text-slate-900" />
-                            ) : (
-                              <Bookmark
-                                className="h-5 w-5 text-slate-500 hover:text-slate-800"
-                                strokeWidth={1.8}
-                              />
-                            )}
-                          </button>
-                        </div>
-
-                        {/* Clickable YouTube Thumbnail */}
-                        {isVideo && item.youtubeVideoId && !isOffline && (
-                          <button
-                            type="button"
-                            onClick={() => setActiveMaterial(item)}
-                            className="relative w-full aspect-video rounded-xl overflow-hidden bg-slate-900 mb-3 group/thumb block cursor-pointer"
-                            aria-label={`Watch ${item.title}`}
-                          >
-                            <Image
-                              src={
-                                item.thumbnailUrl ||
-                                `https://img.youtube.com/vi/${item.youtubeVideoId}/hqdefault.jpg`
-                              }
-                              alt={item.title}
-                              fill
-                              sizes="(max-width: 768px) 100vw, 33vw"
-                              className="object-cover"
-                            />
-                            <div className="absolute inset-0 bg-black/25 flex items-center justify-center group-hover/thumb:bg-black/40 transition-colors">
-                              <div className="w-10 h-10 rounded-full bg-red-600 text-white flex items-center justify-center shadow-md">
-                                <Play className="w-4 h-4 fill-white ml-0.5" />
-                              </div>
-                            </div>
-                          </button>
-                        )}
-
-                        <div className="text-[11px] font-semibold text-[#00875A] mb-1 line-clamp-1">
-                          {courseMeta.title}
-                        </div>
-
-                        {/* Title */}
-                        <button
-                          type="button"
-                          onClick={() => setActiveMaterial(item)}
-                          className="text-left block w-full cursor-pointer"
-                        >
-                          <h3 className="font-bold text-[#0C3B2E] text-base sm:text-lg line-clamp-2 group-hover:text-[#00875A] transition-colors leading-snug">
-                            {item.title}
-                          </h3>
-                        </button>
-
-                        {/* Department & File Size */}
-                        <div className="mt-3 flex items-center justify-between text-xs text-slate-400 font-medium">
-                          <span className="truncate">{item.department}</span>
-                          <span className="shrink-0 ml-2">
-                            {item.fileSize || (isVideo ? "Video Stream" : "PDF")}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Card Actions: Read/Watch, Remove, Download */}
-                      <div className="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setActiveMaterial(item)}
-                          className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            isVideo
-                              ? "bg-[#DBEAFE]/60 hover:bg-[#DBEAFE] text-[#2563EB]"
-                              : "bg-emerald-50 hover:bg-emerald-100 text-[#00875A]"
-                          }`}
-                        >
-                          {isVideo ? (
-                            <>
-                              <Play className="w-3.5 h-3.5 fill-current" />
-                              <span>Watch</span>
-                            </>
-                          ) : (
-                            <>
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>{cachedOffline ? "Read Offline" : "Read"}</span>
-                            </>
-                          )}
-                        </button>
-
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              await shareOrCopyMaterialLink(item);
-                              setCopiedId(targetId);
-                              window.setTimeout(() => setCopiedId(null), 2200);
-                            }}
-                            title="Share or copy direct link"
-                            className="p-2 rounded-xl border border-slate-200 text-slate-500 hover:text-[#00875A] hover:border-emerald-200 hover:bg-emerald-50/50 transition-colors cursor-pointer"
-                          >
-                            {copiedId === targetId ? (
-                              <Check className="w-3.5 h-3.5 text-[#00875A]" />
-                            ) : (
-                              <Share2 className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveFromShelf(item)}
-                            disabled={busyId === targetId}
-                            title={
-                              selectedType === "Offline"
-                                ? "Delete offline copy"
-                                : "Remove from Saved"
-                            }
-                            className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl border border-slate-200 text-slate-500 hover:text-red-600 hover:border-red-200 hover:bg-red-50 text-xs font-semibold transition-colors cursor-pointer"
-                          >
-                            {busyId === targetId ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
-                            ) : (
-                              <Trash2 className="w-3.5 h-3.5" />
-                            )}
-                            <span className="hidden sm:inline">Remove</span>
-                          </button>
-
-                          {canDownloadPdf ? (
-                            <button
-                              type="button"
-                              disabled={isDownloading}
-                              onClick={() => handleDownload(item)}
-                              className={`inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer disabled:opacity-60 ${
-                                cachedOffline
-                                  ? "bg-emerald-50 border border-emerald-200 text-[#0C3B2E] hover:bg-emerald-100"
-                                  : "bg-[#0C3B2E] hover:bg-[#0A251D] text-white"
-                              }`}
-                              title={
-                                cachedOffline
-                                  ? "Save PDF copy from offline vault"
-                                  : "Download PDF & save for offline viewing"
-                              }
-                            >
-                              {isDownloading ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : cachedOffline ? (
-                                <HardDriveDownload className="w-3.5 h-3.5 text-[#00875A]" />
-                              ) : (
-                                <Download className="w-3.5 h-3.5" />
-                              )}
-                              <span className="hidden sm:inline">
-                                {cachedOffline ? "Save Copy" : "Download"}
-                              </span>
-                            </button>
-                          ) : (
-                            item.youtubeUrl &&
-                            !isOffline && (
-                              <a
-                                href={item.youtubeUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-slate-900 transition-all"
-                                title="Open on YouTube"
-                              >
-                                <ExternalLink className="w-3.5 h-3.5" />
-                              </a>
-                            )
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                      item={item}
+                      isBookmarked={isSaved(targetId)}
+                      isCachedOffline={isOfflineAvailable(targetId)}
+                      isDownloading={downloadingIds.has(targetId)}
+                      isTogglingBookmark={busyId === targetId}
+                      isCopied={copiedId === targetId}
+                      isOfflineMode={isOffline}
+                      onOpen={setActiveMaterial}
+                      onToggleBookmark={handleToggleBookmark}
+                      onDownload={handleDownload}
+                      onShare={async (mat) => {
+                        await shareOrCopyMaterialLink(mat);
+                        setCopiedId(targetId);
+                        window.setTimeout(() => setCopiedId(null), 2200);
+                      }}
+                      onRemove={handleRemoveFromShelf}
+                      isRemoving={busyId === targetId}
+                      removeTitle={
+                        selectedType === "Offline"
+                          ? "Delete offline copy"
+                          : "Remove from Saved"
+                      }
+                    />
                   );
                 })}
               </div>

@@ -1,23 +1,102 @@
 @import "tailwindcss";
 
+@theme inline {
+  /* Brand Colors */
+  --color-brand-forest: #0C3B2E;
+  --color-brand-forest-dark: #0A251D;
+  --color-brand-forest-hover: #114C3C;
+  --color-brand-emerald: #00875A;
+  --color-brand-emerald-hover: #00734C;
+
+  /* Surface Tokens */
+  --color-canvas: #FAFAFA;
+  --color-surface: #FFFFFF;
+  --color-surface-subtle: #F8FAFC;
+
+  /* Typography Families (bound to next/font/local variables) */
+  --font-sans: var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-display: var(--font-jakarta), var(--font-geist-sans), system-ui, sans-serif;
+
+  /* Elevation Tokens */
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px -4px rgba(15, 23, 42, 0.05);
+  --shadow-card-hover: 0 4px 12px -2px rgba(15, 23, 42, 0.06), 0 12px 28px -6px rgba(12, 59, 46, 0.08);
+  --shadow-modal: 0 24px 48px -12px rgba(15, 23, 42, 0.25);
+}
+
 :root {
-  --background: #fafafa;
-  --foreground: #0f172a;
+  --background: #FAFAFA;
+  --foreground: #0F172A;
   --brand-forest: #0C3B2E;
   --brand-forest-dark: #0A251D;
+  --brand-forest-hover: #114C3C;
   --brand-emerald: #00875A;
-  --brand-emerald-hover: #00734c;
+  --brand-emerald-hover: #00734C;
 }
 
-body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  overflow-x: hidden;
+@layer base {
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+  }
+
+  /* Consistent accessible keyboard focus ring across all interactive elements */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--brand-emerald);
+    outline-offset: 2px;
+  }
 }
 
-h1, h2, h3, h4 {
-  font-family: var(--font-jakarta), var(--font-geist-sans), system-ui, sans-serif;
+/* Micro-interaction entrance animations (native CSS — no external plugin required) */
+@keyframes ui-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ui-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-ui-fade {
+  animation: ui-fade-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-ui-scale {
+  animation: ui-scale-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Cross-browser scrollbar hiding for horizontal chip/tab strips */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* Custom scrollbar for modern feel */
@@ -37,4 +116,16 @@ h1, h2, h3, h4 {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/* Respect user reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

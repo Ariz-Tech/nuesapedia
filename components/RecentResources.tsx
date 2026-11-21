@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { FileText, ChevronRight, Play, BookOpen, AlertCircle } from "lucide-react";
+import { getResourceBadgeStyle } from "@/lib/badge-styles";
 
 export interface RecentResourceItem {
   id: string;
@@ -24,47 +25,47 @@ function getDepartmentCover(dept: string) {
     return {
       bg: "linear-gradient(135deg, #082f49 0%, #0369a1 100%)",
       tag: "STRUCTURAL & CIVIL",
-      accent: "text-sky-300",
-      subAccent: "text-sky-200",
+      accent: "text-sky-200",
+      subAccent: "text-sky-100/90",
     };
   }
   if (d.includes("mech")) {
     return {
       bg: "linear-gradient(135deg, #1e1b4b 0%, #1e3a8a 100%)",
       tag: "THERMAL & DYNAMICS",
-      accent: "text-indigo-300",
-      subAccent: "text-indigo-200",
+      accent: "text-indigo-200",
+      subAccent: "text-indigo-100/90",
     };
   }
   if (d.includes("material")) {
     return {
       bg: "linear-gradient(135deg, #292524 0%, #44403c 100%)",
       tag: "METALLURGY & SOLIDS",
-      accent: "text-orange-300",
-      subAccent: "text-stone-300",
+      accent: "text-orange-200",
+      subAccent: "text-stone-200",
     };
   }
   if (d.includes("agric") || d.includes("bio")) {
     return {
       bg: "linear-gradient(135deg, #14532d 0%, #166534 100%)",
       tag: "HYDROLOGY & BIO",
-      accent: "text-emerald-300",
-      subAccent: "text-emerald-200",
+      accent: "text-emerald-200",
+      subAccent: "text-emerald-100/90",
     };
   }
   if (d.includes("mining")) {
     return {
       bg: "linear-gradient(135deg, #451a03 0%, #78350f 100%)",
       tag: "MINERAL & GEOLOGY",
-      accent: "text-amber-300",
-      subAccent: "text-amber-200",
+      accent: "text-amber-200",
+      subAccent: "text-amber-100/90",
     };
   }
   return {
-    bg: "linear-gradient(135deg, #0f172a 0%, #334155 100%)",
+    bg: "linear-gradient(135deg, #0A251D 0%, #0C3B2E 100%)",
     tag: "ENGINEERING FACULTY",
-    accent: "text-slate-300",
-    subAccent: "text-slate-200",
+    accent: "text-emerald-200",
+    subAccent: "text-emerald-100/90",
   };
 }
 
@@ -128,21 +129,21 @@ export default function RecentResources({
   }, [hasInitial, fetchLatest]);
 
   return (
-    <section className="py-16 md:py-20 bg-white border-b border-slate-100">
+    <section className="py-16 md:py-20 bg-surface border-y border-slate-200/70">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
-            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
+            <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-brand-forest">
               Recently Added Resources
             </h2>
-            <p className="mt-2 text-sm sm:text-base text-slate-500 max-w-2xl">
+            <p className="mt-2.5 text-sm sm:text-base text-slate-600 max-w-2xl leading-relaxed">
               Latest peer-reviewed lecture notes, exam past questions, and video modules verified by faculty moderators.
             </p>
           </div>
 
           <Link
             href="/resources"
-            className="flex items-center gap-1 text-sm font-semibold text-slate-700 hover:text-[#00875A] transition-colors shrink-0 group"
+            className="inline-flex items-center gap-1 text-sm font-semibold text-brand-emerald hover:text-brand-emerald-hover transition-colors shrink-0 group self-start sm:self-auto"
           >
             <span>View All Vault Materials</span>
             <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
@@ -154,17 +155,19 @@ export default function RecentResources({
             {[1, 2, 3, 4].map((i) => (
               <div
                 key={i}
-                className="bg-slate-50 border border-slate-200/80 rounded-2xl h-64 animate-pulse"
+                className="bg-surface-subtle border border-slate-200/80 rounded-2xl h-72 animate-pulse"
               />
             ))}
           </div>
         ) : error ? (
-          <div className="mt-8 p-8 text-center bg-rose-50/60 rounded-3xl border border-rose-200/80">
-            <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-2" />
+          <div className="mt-8 p-8 text-center bg-rose-50/70 rounded-2xl border border-rose-200/80">
+            <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-2.5" />
             <h3 className="text-base font-bold text-rose-900">
               Failed to Load Resources
             </h3>
-            <p className="text-xs text-rose-600 mt-1 max-w-md mx-auto">{error}</p>
+            <p className="text-xs sm:text-sm text-rose-700 mt-1 max-w-md mx-auto">
+              {error}
+            </p>
             <button
               type="button"
               onClick={handleRetry}
@@ -174,17 +177,17 @@ export default function RecentResources({
             </button>
           </div>
         ) : resources.length === 0 ? (
-          <div className="mt-8 p-12 text-center bg-slate-50 rounded-3xl border border-slate-200/80">
-            <BookOpen className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-            <h3 className="text-base font-bold text-slate-800">
+          <div className="mt-8 p-12 text-center bg-surface-subtle rounded-2xl border border-dashed border-slate-300">
+            <BookOpen className="w-8 h-8 text-slate-400 mx-auto mb-2.5" />
+            <h3 className="text-base font-bold text-brand-forest">
               No Approved Resources Yet
             </h3>
-            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+            <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-md mx-auto">
               Be the first student or faculty member to contribute verified study notes or exam solutions.
             </p>
             <Link
               href="/upload"
-              className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#00875A] text-white text-xs font-semibold hover:bg-[#00734c] transition-colors"
+              className="mt-5 inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-brand-emerald text-white text-xs sm:text-sm font-semibold hover:bg-brand-emerald-hover transition-colors"
             >
               Upload First Material
             </Link>
@@ -194,19 +197,20 @@ export default function RecentResources({
             {resources.map((item) => {
               const cover = getDepartmentCover(item.department);
               const isVideo = item.medium === "YOUTUBE";
+              const badge = getResourceBadgeStyle(item);
 
               return (
                 <Link
                   key={item.id}
                   href={`/resources/${item.id}`}
-                  className="group bg-white border border-slate-200 rounded-2xl overflow-hidden hover:border-slate-300 transition-all hover:shadow-[0_8px_20px_rgba(0,0,0,0.06)] flex flex-col justify-between"
+                  className="group bg-surface border border-slate-200/90 rounded-2xl overflow-hidden hover:border-slate-300 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between"
                 >
                   <div>
                     <div
-                      className="h-44 w-full rounded-t-2xl relative transition-transform duration-300 group-hover:scale-[1.01] overflow-hidden"
+                      className="h-40 w-full relative overflow-hidden"
                       style={{
                         background:
-                          isVideo && item.thumbnailUrl ? "#000" : cover.bg,
+                          isVideo && item.thumbnailUrl ? "#0f172a" : cover.bg,
                       }}
                     >
                       {isVideo && item.thumbnailUrl ? (
@@ -216,7 +220,7 @@ export default function RecentResources({
                             alt={item.title}
                             fill
                             sizes="(max-width: 768px) 100vw, 25vw"
-                            className="object-cover opacity-85 group-hover:opacity-95 transition-opacity"
+                            className="object-cover opacity-85 group-hover:opacity-95 group-hover:scale-105 transition-all duration-300"
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
                           <div className="absolute inset-0 flex items-center justify-center">
@@ -224,83 +228,70 @@ export default function RecentResources({
                               <Play className="w-5 h-5 fill-current ml-0.5" />
                             </span>
                           </div>
-                          <div className="absolute bottom-2.5 left-3 right-3 text-white">
-                            <span className="text-[10px] font-mono tracking-wider uppercase text-red-300 font-semibold">
-                              Video Tutorial
-                            </span>
-                          </div>
                         </div>
                       ) : (
                         <div className="w-full h-full flex flex-col justify-between p-4 text-white relative">
-                          <div className="absolute top-2 right-2 opacity-15">
-                            <svg
-                              width="70"
-                              height="70"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1"
-                            >
-                              <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z" />
-                              <path d="M6 6h10" />
-                              <path d="M6 10h10" />
-                            </svg>
-                          </div>
-                          <div>
+                          <div
+                            aria-hidden="true"
+                            className="absolute inset-0 opacity-15"
+                            style={{
+                              backgroundImage:
+                                "radial-gradient(rgba(255,255,255,0.4) 1px, transparent 1px)",
+                              backgroundSize: "14px 14px",
+                            }}
+                          />
+                          <div className="relative z-10">
                             <span
-                              className={`text-[10px] tracking-widest uppercase font-mono font-medium ${cover.accent}`}
+                              className={`text-[10px] tracking-widest uppercase font-mono font-semibold ${cover.accent}`}
                             >
                               {cover.tag}
                             </span>
-                            <h4 className="text-sm font-bold tracking-tight text-white mt-0.5 leading-snug line-clamp-2">
+                            <div className="text-base font-extrabold tracking-tight text-white font-mono mt-1">
                               {item.courseCode}
-                            </h4>
-                            <span
-                              className={`text-[11px] font-medium line-clamp-2 ${cover.subAccent}`}
-                            >
-                              {item.title}
-                            </span>
+                            </div>
                           </div>
-                          <div className="flex items-center justify-between text-[9px] font-mono border-t border-white/10 pt-2 text-slate-300">
+                          <div className="relative z-10 flex items-center justify-between text-[11px] font-mono border-t border-white/15 pt-2 text-white/80">
                             <span>{item.level}</span>
-                            <span className="font-semibold text-white uppercase">
-                              {item.type}
+                            <span className="font-semibold text-white uppercase truncate ml-2">
+                              {item.department.split(" ")[0]}
                             </span>
                           </div>
                         </div>
                       )}
                     </div>
 
-                    <div className="p-4 sm:p-5">
-                      <div className="flex items-center gap-2 mb-3 flex-wrap">
-                        <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
-                          {item.department}
+                    <div className="p-5">
+                      <div className="flex items-center gap-1.5 mb-2.5 flex-wrap">
+                        <span
+                          className={`text-[11px] font-bold tracking-wider uppercase px-2.5 py-0.5 rounded-full ${badge.className}`}
+                        >
+                          {badge.label}
                         </span>
-                        <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-[#00875A]">
+                        <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded-md bg-brand-forest text-white">
                           {item.courseCode}
                         </span>
                       </div>
 
-                      <h3 className="text-sm font-semibold text-slate-900 group-hover:text-[#0C3B2E] transition-colors line-clamp-2 leading-snug">
+                      <h3 className="text-sm sm:text-base font-bold text-brand-forest group-hover:text-brand-emerald transition-colors line-clamp-2 leading-snug">
                         {item.title}
                       </h3>
                     </div>
                   </div>
 
-                  <div className="px-4 sm:px-5 pb-4 pt-1 flex items-center justify-between text-xs text-slate-400">
-                    <span className="flex items-center gap-1.5">
+                  <div className="px-5 pb-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-medium">
+                    <span className="flex items-center gap-1.5 truncate">
                       {isVideo ? (
-                        <Play className="w-3.5 h-3.5 text-red-500" />
+                        <Play className="w-3.5 h-3.5 text-red-600 shrink-0" />
                       ) : (
-                        <FileText className="w-3.5 h-3.5" />
+                        <FileText className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                       )}
-                      <span>
+                      <span className="truncate">
                         {isVideo
                           ? "YouTube Tutorial"
                           : item.fileSize || "PDF Document"}
                       </span>
                     </span>
-                    <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                    <span className="text-[11px] font-semibold text-brand-emerald bg-emerald-50 px-2 py-0.5 rounded-md shrink-0">
                       Verified
                     </span>
                   </div>

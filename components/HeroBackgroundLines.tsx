@@ -14,6 +14,10 @@ export default function HeroBackgroundLines() {
     const el = containerRef.current;
     if (!el) return;
 
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
     const updateDimensions = () => {
       const rect = el.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
@@ -24,6 +28,12 @@ export default function HeroBackgroundLines() {
     updateDimensions();
     const observer = new ResizeObserver(updateDimensions);
     observer.observe(el);
+
+    if (prefersReducedMotion) {
+      return () => {
+        observer.disconnect();
+      };
+    }
 
     let rafId: number | null = null;
     let lastSnappedX = -1000;
@@ -473,18 +483,18 @@ export default function HeroBackgroundLines() {
               x2="100%"
               y2={snappedY}
               stroke="#00875A"
-              strokeWidth="1.5"
-              strokeOpacity="0.45"
+              strokeWidth="1.25"
+              strokeOpacity="0.28"
             />
-            {/* Bright glowing laser core on the active horizontal line */}
+            {/* Soft glowing accent on the active horizontal line */}
             <line
-              x1={Math.max(0, mousePos.x - 220)}
+              x1={Math.max(0, mousePos.x - 200)}
               y1={snappedY}
-              x2={Math.min(width, mousePos.x + 220)}
+              x2={Math.min(width, mousePos.x + 200)}
               y2={snappedY}
               stroke="#00875A"
-              strokeWidth="2.5"
-              strokeOpacity="0.9"
+              strokeWidth="2"
+              strokeOpacity="0.55"
               filter="url(#emerald-glow)"
             />
 
@@ -495,18 +505,18 @@ export default function HeroBackgroundLines() {
               x2={snappedX}
               y2="100%"
               stroke="#00875A"
-              strokeWidth="1.5"
-              strokeOpacity="0.45"
+              strokeWidth="1.25"
+              strokeOpacity="0.28"
             />
-            {/* Bright glowing laser core on the active vertical line */}
+            {/* Soft glowing accent on the active vertical line */}
             <line
               x1={snappedX}
-              y1={Math.max(0, mousePos.y - 220)}
+              y1={Math.max(0, mousePos.y - 200)}
               x2={snappedX}
-              y2={Math.min(height, mousePos.y + 220)}
+              y2={Math.min(height, mousePos.y + 200)}
               stroke="#00875A"
-              strokeWidth="2.5"
-              strokeOpacity="0.9"
+              strokeWidth="2"
+              strokeOpacity="0.55"
               filter="url(#emerald-glow)"
             />
           </g>
