@@ -14,7 +14,7 @@ const INPUT_CLASS =
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, loading: authLoading, refresh: refreshAuth } = useAuth();
+  const { user, loading: authLoading, setUser: setAuthUser } = useAuth();
 
   const redirectTarget = getSafeRedirectPath(
     searchParams.get("callbackUrl") || searchParams.get("redirect"),
@@ -58,7 +58,9 @@ function LoginForm() {
         );
       }
 
-      await refreshAuth();
+      if (data.user) {
+        setAuthUser(data.user);
+      }
       router.push(redirectTarget);
       router.refresh();
     } catch (err: unknown) {

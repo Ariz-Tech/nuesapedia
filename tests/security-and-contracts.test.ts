@@ -35,7 +35,10 @@ import {
 import {
   canAccessSubmission,
   createSubmission,
+  countUserUploadingSubmissions,
   deleteSubmissionWithChecks,
+  getApprovedCourses,
+  getModerationStatusCounts,
   mapSubmissionRow,
   updateSubmissionStatus,
   pruneStaleUploads,
@@ -572,6 +575,63 @@ test("Resource reporting rejects non-existent resources with 404", async () => {
   assert.equal(res.status, 404);
   const json = await res.json();
   assert.equal(json.error?.code, "NOT_FOUND");
+});
+
+test("countUserUploadingSubmissions accurately counts in-flight UPLOADING sessions", async () => {
+  const userId = `usr_upload_guard_${Date.now()}`;
+  assert.equal(await countUserUploadingSubmissions(userId), 0);
+
+  await createSubmission({
+    id: `sub_up_1_${Date.now()}`,
+    userId,
+    title: "In-flight Upload 1",
+    courseCode: "MEE 301",
+    department: "Mechanical Engineering",
+    level: "300L",
+    semester: "First Semester",
+    type: "Lecture Note",
+    medium: "PDF",
+    status: "UPLOADING",
+  });
+  await createSubmission({
+    id: `sub_up_2_${Date.now()}`,
+    userId,
+    title: "Completed Upload",
+    courseCode: "MEE 301",
+    department: "Mechanical Engineering",
+    level: "300L",
+    semester: "First Semester",
+    type: "Lecture Note",
+    medium: "PDF",
+    status: "PENDING_REVIEW",
+  });
+
+  assert.equal(await countUserUploadingSubmissions(userId), 1);
+});
+
+test("getModerationStatusCounts and getApprovedCourses department pushdown return accurate aggregates", async () => {
+  await createSubmission({
+    id: `sub_agg_civil_${Date.now()}`,
+    userId: "usr_agg",
+    title: "Soil Mechanics Notes",
+    courseCode: "CVE 305",
+    department: "Civil Engineering",
+    level: "300L",
+    semester: "First Semester",
+    type: "Lecture Note",
+    medium: "PDF",
+    status: "APPROVED",
+  });
+
+  const counts = await getModerationStatusCounts();
+  assert.ok(counts.approved >= 1);
+  assert.equal(counts.total, counts.pending + counts.approved + counts.rejected);
+
+  const civilCourses = await getApprovedCourses("Civil Engineering");
+  assert.ok(civilCourses.some((c) => c.code === "CVE 305"));
+  assert.ok(
+    civilCourses.every((c) => c.department.toLowerCase() === "civil engineering")
+  );
 });
 
 

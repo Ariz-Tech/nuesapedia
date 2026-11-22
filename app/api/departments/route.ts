@@ -1,6 +1,7 @@
 import { DEPARTMENT_RECORDS } from "@/lib/departments";
 import { getApprovedCourses } from "@/lib/db";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
+import { PUBLIC_COURSES_CACHE_HEADERS } from "@/lib/cache";
 
 export async function GET() {
   try {
@@ -22,7 +23,7 @@ export async function GET() {
       };
     });
 
-    return apiSuccess({ departments });
+    return apiSuccess({ departments }, 200, PUBLIC_COURSES_CACHE_HEADERS);
   } catch (error) {
     console.error("GET /api/departments error:", error);
     return apiError("INTERNAL_ERROR", "Failed to load departments.", 500);

@@ -8,21 +8,26 @@ import { formatBytes } from "./format";
 export { formatBytes };
 
 const DB_NAME = "nuesapedia_offline_db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const DOCS_STORE = "offline_documents";
+const DOCS_META_STORE = "offline_metadata";
 const CATALOG_STORE = "catalog_cache";
 const PROGRESS_STORE = "reading_progress";
 
 export const OFFLINE_VAULT_EVENT = "nuesa-offline-vault-changed";
+export const READING_PROGRESS_EVENT = "nuesa-reading-progress-changed";
 
-export interface OfflineDocumentRecord {
+export interface OfflineDocumentMeta {
   id: string;
   material: CourseMaterialItem;
-  blob: Blob;
   mimeType: string;
   sizeBytes: number;
   filename: string;
   savedAt: string;
+}
+
+export interface OfflineDocumentRecord extends OfflineDocumentMeta {
+  blob: Blob;
 }
 
 export interface ReadingProgressRecord {
@@ -46,9 +51,17 @@ export function getSafeDocumentFilename(material: CourseMaterialItem): string {
 
 export const getSafePdfFilename = getSafeDocumentFilename;
 
+// Singleton cached IndexedDB connection avoids open/close thrashing on every operation.
+let sharedDbPromise: Promise<IDBDatabase> | null = null;
+
 function openVaultDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (sharedDbPromise) {
+    return sharedDbPromise;
+  }
+
+  sharedDbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof window === "undefined" || !("indexedDB" in window)) {
+      sharedDbPromise = null;
       reject(new Error("IndexedDB is not supported in this browser."));
       return;
     }
@@ -60,6 +73,31 @@ function openVaultDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(DOCS_STORE)) {
         db.createObjectStore(DOCS_STORE, { keyPath: "id" });
       }
+      if (!db.objectStoreNames.contains(DOCS_META_STORE)) {
+        const metaStore = db.createObjectStore(DOCS_META_STORE, { keyPath: "id" });
+        // Backfill lightweight metadata from existing v2 blob records during upgrade
+        const tx = request.transaction;
+        if (tx && db.objectStoreNames.contains(DOCS_STORE)) {
+          const docsStore = tx.objectStore(DOCS_STORE);
+          const cursorReq = docsStore.openCursor();
+          cursorReq.onsuccess = () => {
+            const cursor = cursorReq.result;
+            if (!cursor) return;
+            const rec = cursor.value as OfflineDocumentRecord;
+            if (rec && rec.id) {
+              metaStore.put({
+                id: rec.id,
+                material: rec.material,
+                mimeType: rec.mimeType || "application/pdf",
+                sizeBytes: rec.sizeBytes || rec.blob?.size || 0,
+                filename: rec.filename,
+                savedAt: rec.savedAt,
+              } satisfies OfflineDocumentMeta);
+            }
+            cursor.continue();
+          };
+        }
+      }
       if (!db.objectStoreNames.contains(CATALOG_STORE)) {
         db.createObjectStore(CATALOG_STORE, { keyPath: "id" });
       }
@@ -68,10 +106,25 @@ function openVaultDb(): Promise<IDBDatabase> {
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () =>
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        sharedDbPromise = null;
+      };
+      db.onclose = () => {
+        sharedDbPromise = null;
+      };
+      resolve(db);
+    };
+
+    request.onerror = () => {
+      sharedDbPromise = null;
       reject(request.error || new Error("Failed to open IndexedDB."));
+    };
   });
+
+  return sharedDbPromise;
 }
 
 export async function estimateVaultStorage(): Promise<{
@@ -125,37 +178,37 @@ export async function saveOfflineDocument(
   }
 
   const canonicalId = material.resourceId || material.id;
-  const record: OfflineDocumentRecord = {
+  const meta: OfflineDocumentMeta = {
     id: canonicalId,
     material: { ...material, id: canonicalId, resourceId: canonicalId },
-    blob,
     mimeType: blob.type || "application/pdf",
     sizeBytes: blob.size,
     filename: getSafePdfFilename(material),
     savedAt: new Date().toISOString(),
   };
+  const record: OfflineDocumentRecord = {
+    ...meta,
+    blob,
+  };
 
   const db = await openVaultDb();
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(DOCS_STORE, "readwrite");
-      tx.objectStore(DOCS_STORE).put(record);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => {
-        if (tx.error?.name === "QuotaExceededError") {
-          reject(
-            new Error(
-              "Device offline storage is full. Please remove some offline documents in your Offline Vault."
-            )
-          );
-        } else {
-          reject(tx.error || new Error("Failed to save document offline."));
-        }
-      };
-    });
-  } finally {
-    db.close();
-  }
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([DOCS_STORE, DOCS_META_STORE], "readwrite");
+    tx.objectStore(DOCS_STORE).put(record);
+    tx.objectStore(DOCS_META_STORE).put(meta);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => {
+      if (tx.error?.name === "QuotaExceededError") {
+        reject(
+          new Error(
+            "Device offline storage is full. Please remove some offline documents in your Offline Vault."
+          )
+        );
+      } else {
+        reject(tx.error || new Error("Failed to save document offline."));
+      }
+    };
+  });
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(OFFLINE_VAULT_EVENT));
@@ -168,58 +221,57 @@ export async function getOfflineDocument(
 ): Promise<OfflineDocumentRecord | null> {
   try {
     const db = await openVaultDb();
-    try {
-      return await new Promise<OfflineDocumentRecord | null>((resolve, reject) => {
-        const tx = db.transaction(DOCS_STORE, "readonly");
-        const req = tx.objectStore(DOCS_STORE).get(id);
-        req.onsuccess = () => resolve((req.result as OfflineDocumentRecord) || null);
-        req.onerror = () => reject(req.error);
-      });
-    } finally {
-      db.close();
-    }
+    return await new Promise<OfflineDocumentRecord | null>((resolve, reject) => {
+      const tx = db.transaction(DOCS_STORE, "readonly");
+      const req = tx.objectStore(DOCS_STORE).get(id);
+      req.onsuccess = () => resolve((req.result as OfflineDocumentRecord) || null);
+      req.onerror = () => reject(req.error);
+    });
   } catch {
     return null;
   }
 }
 
-export async function getAllOfflineDocuments(): Promise<OfflineDocumentRecord[]> {
+/**
+ * Returns ONLY lightweight document metadata (no multi-MB PDF Blobs in RAM)
+ * for global React state, badges, and offline vault listing.
+ */
+export async function getAllOfflineDocumentMeta(): Promise<OfflineDocumentMeta[]> {
   try {
     const db = await openVaultDb();
-    try {
-      const records = await new Promise<OfflineDocumentRecord[]>(
-        (resolve, reject) => {
-          const tx = db.transaction(DOCS_STORE, "readonly");
-          const req = tx.objectStore(DOCS_STORE).getAll();
-          req.onsuccess = () =>
-            resolve((req.result as OfflineDocumentRecord[]) || []);
-          req.onerror = () => reject(req.error);
-        }
-      );
-      return records.sort(
-        (a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime()
-      );
-    } finally {
-      db.close();
-    }
+    const records = await new Promise<OfflineDocumentMeta[]>((resolve, reject) => {
+      const tx = db.transaction(DOCS_META_STORE, "readonly");
+      const req = tx.objectStore(DOCS_META_STORE).getAll();
+      req.onsuccess = () =>
+        resolve((req.result as OfflineDocumentMeta[]) || []);
+      req.onerror = () => reject(req.error);
+    });
+    return records.sort(
+      (a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime()
+    );
   } catch {
     return [];
   }
 }
 
+/**
+ * @deprecated Prefer `getAllOfflineDocumentMeta()` for listing and `getOfflineDocument(id)`
+ * to load a single Blob on demand. Kept for backwards compatibility.
+ */
+export async function getAllOfflineDocuments(): Promise<OfflineDocumentMeta[]> {
+  return getAllOfflineDocumentMeta();
+}
+
 export async function removeOfflineDocument(id: string): Promise<void> {
   try {
     const db = await openVaultDb();
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(DOCS_STORE, "readwrite");
-        tx.objectStore(DOCS_STORE).delete(id);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-    } finally {
-      db.close();
-    }
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([DOCS_STORE, DOCS_META_STORE], "readwrite");
+      tx.objectStore(DOCS_STORE).delete(id);
+      tx.objectStore(DOCS_META_STORE).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(OFFLINE_VAULT_EVENT));
     }
@@ -231,16 +283,13 @@ export async function removeOfflineDocument(id: string): Promise<void> {
 export async function clearAllOfflineDocuments(): Promise<void> {
   try {
     const db = await openVaultDb();
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(DOCS_STORE, "readwrite");
-        tx.objectStore(DOCS_STORE).clear();
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-    } finally {
-      db.close();
-    }
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([DOCS_STORE, DOCS_META_STORE], "readwrite");
+      tx.objectStore(DOCS_STORE).clear();
+      tx.objectStore(DOCS_META_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(OFFLINE_VAULT_EVENT));
     }
@@ -252,18 +301,14 @@ export async function clearAllOfflineDocuments(): Promise<void> {
 export async function clearLocalReadingProgress(): Promise<void> {
   try {
     const db = await openVaultDb();
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(PROGRESS_STORE, "readwrite");
-        tx.objectStore(PROGRESS_STORE).clear();
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-    } finally {
-      db.close();
-    }
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(PROGRESS_STORE, "readwrite");
+      tx.objectStore(PROGRESS_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent(OFFLINE_VAULT_EVENT));
+      window.dispatchEvent(new CustomEvent(READING_PROGRESS_EVENT));
     }
   } catch {
     // Ignore
@@ -321,8 +366,7 @@ export async function downloadAndCacheMaterial(
     }
 
     const blob = await fileRes.blob();
-    const docBlob = blob;
-    const saved = await saveOfflineDocument(material, docBlob);
+    const saved = await saveOfflineDocument(material, blob);
     if (saveToDevice) {
       triggerBrowserBlobDownload(saved.blob, saved.filename);
     }
@@ -351,20 +395,16 @@ export async function cacheCatalogResources(
 ): Promise<void> {
   try {
     const db = await openVaultDb();
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(CATALOG_STORE, "readwrite");
-        const store = tx.objectStore(CATALOG_STORE);
-        store.clear();
-        for (const item of items.slice(0, 200)) {
-          store.put(item);
-        }
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-    } finally {
-      db.close();
-    }
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(CATALOG_STORE, "readwrite");
+      const store = tx.objectStore(CATALOG_STORE);
+      store.clear();
+      for (const item of items.slice(0, 200)) {
+        store.put(item);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
   } catch {
     // Ignore
   }
@@ -373,17 +413,13 @@ export async function cacheCatalogResources(
 export async function getCachedCatalogResources(): Promise<CourseMaterialItem[]> {
   try {
     const db = await openVaultDb();
-    try {
-      return await new Promise<CourseMaterialItem[]>((resolve, reject) => {
-        const tx = db.transaction(CATALOG_STORE, "readonly");
-        const req = tx.objectStore(CATALOG_STORE).getAll();
-        req.onsuccess = () =>
-          resolve((req.result as CourseMaterialItem[]) || []);
-        req.onerror = () => reject(req.error);
-      });
-    } finally {
-      db.close();
-    }
+    return await new Promise<CourseMaterialItem[]>((resolve, reject) => {
+      const tx = db.transaction(CATALOG_STORE, "readonly");
+      const req = tx.objectStore(CATALOG_STORE).getAll();
+      req.onsuccess = () =>
+        resolve((req.result as CourseMaterialItem[]) || []);
+      req.onerror = () => reject(req.error);
+    });
   } catch {
     return [];
   }
@@ -405,19 +441,16 @@ export async function saveReadingProgress(
 
   try {
     const db = await openVaultDb();
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(PROGRESS_STORE, "readwrite");
-        tx.objectStore(PROGRESS_STORE).put(record);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-    } finally {
-      db.close();
-    }
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(PROGRESS_STORE, "readwrite");
+      tx.objectStore(PROGRESS_STORE).put(record);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
 
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent(OFFLINE_VAULT_EVENT));
+      // Dedicated event so reading progress updates never trigger offline-vault reloads
+      window.dispatchEvent(new CustomEvent(READING_PROGRESS_EVENT));
     }
   } catch {
     // Ignore IndexedDB error
@@ -437,19 +470,15 @@ export async function getReadingProgress(
 ): Promise<ReadingProgressRecord | null> {
   try {
     const db = await openVaultDb();
-    try {
-      return await new Promise<ReadingProgressRecord | null>(
-        (resolve, reject) => {
-          const tx = db.transaction(PROGRESS_STORE, "readonly");
-          const req = tx.objectStore(PROGRESS_STORE).get(resourceId);
-          req.onsuccess = () =>
-            resolve((req.result as ReadingProgressRecord) || null);
-          req.onerror = () => reject(req.error);
-        }
-      );
-    } finally {
-      db.close();
-    }
+    return await new Promise<ReadingProgressRecord | null>(
+      (resolve, reject) => {
+        const tx = db.transaction(PROGRESS_STORE, "readonly");
+        const req = tx.objectStore(PROGRESS_STORE).get(resourceId);
+        req.onsuccess = () =>
+          resolve((req.result as ReadingProgressRecord) || null);
+        req.onerror = () => reject(req.error);
+      }
+    );
   } catch {
     return null;
   }
@@ -458,23 +487,19 @@ export async function getReadingProgress(
 export async function getAllReadingProgress(): Promise<ReadingProgressRecord[]> {
   try {
     const db = await openVaultDb();
-    try {
-      const records = await new Promise<ReadingProgressRecord[]>(
-        (resolve, reject) => {
-          const tx = db.transaction(PROGRESS_STORE, "readonly");
-          const req = tx.objectStore(PROGRESS_STORE).getAll();
-          req.onsuccess = () =>
-            resolve((req.result as ReadingProgressRecord[]) || []);
-          req.onerror = () => reject(req.error);
-        }
-      );
-      return records.sort(
-        (a, b) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
-    } finally {
-      db.close();
-    }
+    const records = await new Promise<ReadingProgressRecord[]>(
+      (resolve, reject) => {
+        const tx = db.transaction(PROGRESS_STORE, "readonly");
+        const req = tx.objectStore(PROGRESS_STORE).getAll();
+        req.onsuccess = () =>
+          resolve((req.result as ReadingProgressRecord[]) || []);
+        req.onerror = () => reject(req.error);
+      }
+    );
+    return records.sort(
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
   } catch {
     return [];
   }

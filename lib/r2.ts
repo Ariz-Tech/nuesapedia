@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   HeadBucketCommand,
   HeadObjectCommand,
 } from "@aws-sdk/client-s3";
@@ -134,14 +135,34 @@ export async function verifyR2DocumentObject(
   }
 
   try {
-    const head = await client.send(
-      new HeadObjectCommand({
+    // Single ranged GetObject returns both the magic header bytes and total ContentRange size
+    // (`bytes 0-15/<totalBytes>`), halving R2 round-trips compared to HeadObject + GetObject.
+    const rangeRes = await client.send(
+      new GetObjectCommand({
         Bucket: R2_BUCKET_NAME,
         Key: key,
+        Range: "bytes=0-15",
       })
     );
 
-    const sizeBytes = Number(head.ContentLength ?? 0);
+    let sizeBytes = 0;
+    const contentRangeMatch = rangeRes.ContentRange?.match(/\/(\d+)$/);
+    if (contentRangeMatch) {
+      sizeBytes = Number(contentRangeMatch[1]);
+    } else if (rangeRes.ContentLength !== undefined) {
+      sizeBytes = Number(rangeRes.ContentLength);
+    }
+
+    if (!sizeBytes) {
+      const head = await client.send(
+        new HeadObjectCommand({
+          Bucket: R2_BUCKET_NAME,
+          Key: key,
+        })
+      );
+      sizeBytes = Number(head.ContentLength ?? 0);
+    }
+
     if (sizeBytes <= 0) {
       return { valid: false, error: "Uploaded file is empty." };
     }
@@ -152,14 +173,6 @@ export async function verifyR2DocumentObject(
         error: `Uploaded file exceeds maximum allowed size of ${Math.round(maxBytes / (1024 * 1024))}MB.`,
       };
     }
-
-    const rangeRes = await client.send(
-      new GetObjectCommand({
-        Bucket: R2_BUCKET_NAME,
-        Key: key,
-        Range: "bytes=0-15",
-      })
-    );
 
     const bytes = await rangeRes.Body?.transformToByteArray();
     if (!bytes || bytes.length === 0) {
@@ -180,6 +193,9 @@ export async function verifyR2DocumentObject(
     const code = (err as { name?: string })?.name;
     if (code === "NotFound" || code === "NoSuchKey") {
       return { valid: false, error: "Upload not found in storage. Please try uploading again." };
+    }
+    if (code === "InvalidRange") {
+      return { valid: false, error: "Uploaded file is empty." };
     }
     console.error("verifyR2DocumentObject error:", err);
     return { valid: false, error: "Could not verify uploaded file in storage." };
@@ -203,6 +219,48 @@ export async function deleteR2Object(key: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Batch-deletes up to 1,000 objects per R2 API request so cleanup cron jobs
+ * never hit serverless timeouts on large orphan backlogs.
+ */
+export async function deleteR2ObjectsBatch(
+  keys: string[]
+): Promise<{ deletedCount: number; failedKeys: string[] }> {
+  const client = getR2Client();
+  if (!client || keys.length === 0) {
+    return { deletedCount: 0, failedKeys: [] };
+  }
+
+  let deletedCount = 0;
+  const failedKeys: string[] = [];
+
+  for (let i = 0; i < keys.length; i += 1000) {
+    const chunk = keys.slice(i, i + 1000);
+    try {
+      const res = await client.send(
+        new DeleteObjectsCommand({
+          Bucket: R2_BUCKET_NAME,
+          Delete: {
+            Objects: chunk.map((Key) => ({ Key })),
+            Quiet: false,
+          },
+        })
+      );
+      deletedCount += res.Deleted?.length ?? 0;
+      if (res.Errors?.length) {
+        for (const err of res.Errors) {
+          if (err.Key) failedKeys.push(err.Key);
+        }
+      }
+    } catch (err) {
+      console.error("[r2] Batch delete failed for chunk:", err);
+      failedKeys.push(...chunk);
+    }
+  }
+
+  return { deletedCount, failedKeys };
 }
 
 export async function checkR2Health(): Promise<{

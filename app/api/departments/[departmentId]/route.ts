@@ -1,6 +1,11 @@
 import { resolveDepartment } from "@/lib/departments";
-import { getApprovedCourses, getApprovedResourcesPaginated } from "@/lib/db";
+import {
+  getApprovedCourses,
+  getApprovedResourcesPaginated,
+  toPublicResource,
+} from "@/lib/db";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
+import { PUBLIC_CATALOG_CACHE_HEADERS } from "@/lib/cache";
 
 export async function GET(
   _req: Request,
@@ -24,17 +29,13 @@ export async function GET(
       return apiError("NOT_FOUND", "Engineering department not found.", 404);
     }
 
-    const [allCourses, resourcesResult] = await Promise.all([
-      getApprovedCourses(),
+    const [courses, resourcesResult] = await Promise.all([
+      getApprovedCourses(dept.name),
       getApprovedResourcesPaginated({
         department: dept.name,
-        limit: 50,
+        limit: 12,
       }),
     ]);
-
-    const courses = allCourses.filter(
-      (c) => c.department.toLowerCase() === dept.name.toLowerCase()
-    );
 
     const levels = ["100L", "200L", "300L", "400L", "500L"].map((lvl) => {
       const levelCourses = courses.filter((c) => c.level === lvl);
@@ -49,16 +50,20 @@ export async function GET(
       };
     });
 
-    return apiSuccess({
-      department: {
-        ...dept,
-        courseCount: courses.length,
-        resourceCount: resourcesResult.total,
-        levels,
-        courses,
-        recentResources: resourcesResult.resources.slice(0, 12),
+    return apiSuccess(
+      {
+        department: {
+          ...dept,
+          courseCount: courses.length,
+          resourceCount: resourcesResult.total,
+          levels,
+          courses,
+          recentResources: resourcesResult.resources.map(toPublicResource),
+        },
       },
-    });
+      200,
+      PUBLIC_CATALOG_CACHE_HEADERS
+    );
   } catch (error) {
     console.error("GET /api/departments/[departmentId] error:", error);
     return apiError("INTERNAL_ERROR", "Failed to load department details.", 500);

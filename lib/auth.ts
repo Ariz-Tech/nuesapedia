@@ -1,10 +1,41 @@
 import crypto from "node:crypto";
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { findUserById } from "./db/users";
+import { findUserProfileById } from "./db/users";
+import type { DbUser } from "./db/types";
 
 export const SESSION_COOKIE_NAME = "nuesapedia_session";
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// Bound concurrent scrypt executions per worker so auth spikes never starve Node's
+// libuv threadpool (default 4 threads) and block DNS lookups / FS I/O for other routes.
+const MAX_CONCURRENT_SCRYPT = Math.max(
+  1,
+  Number(process.env.MAX_CONCURRENT_SCRYPT) || 3
+);
+let activeScryptCount = 0;
+const scryptWaitQueue: Array<() => void> = [];
+
+async function runBoundedScrypt(password: string, salt: string): Promise<Buffer> {
+  if (activeScryptCount >= MAX_CONCURRENT_SCRYPT) {
+    await new Promise<void>((resolve) => {
+      scryptWaitQueue.push(resolve);
+    });
+  }
+  activeScryptCount += 1;
+  try {
+    return await new Promise<Buffer>((resolve, reject) => {
+      crypto.scrypt(password, salt, 64, (err, key) => {
+        if (err) reject(err);
+        else resolve(key);
+      });
+    });
+  } finally {
+    activeScryptCount -= 1;
+    const next = scryptWaitQueue.shift();
+    if (next) next();
+  }
+}
 
 function getSessionSecret(): string {
   const secret = process.env.SESSION_SECRET;
@@ -24,12 +55,7 @@ function getSessionSecret(): string {
  */
 export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.randomBytes(16).toString("hex");
-  const derivedKey = await new Promise<Buffer>((resolve, reject) => {
-    crypto.scrypt(password, salt, 64, (err, key) => {
-      if (err) reject(err);
-      else resolve(key);
-    });
-  });
+  const derivedKey = await runBoundedScrypt(password, salt);
   return `${salt}:${derivedKey.toString("hex")}`;
 }
 
@@ -48,12 +74,7 @@ export async function verifyPassword(
   if (!salt || !keyHex) return false;
 
   const keyBuffer = Buffer.from(keyHex, "hex");
-  const derivedKey = await new Promise<Buffer>((resolve, reject) => {
-    crypto.scrypt(password, salt, 64, (err, key) => {
-      if (err) reject(err);
-      else resolve(key);
-    });
-  });
+  const derivedKey = await runBoundedScrypt(password, salt);
 
   if (keyBuffer.length !== derivedKey.length) return false;
   return crypto.timingSafeEqual(keyBuffer, derivedKey);
@@ -144,12 +165,18 @@ export function hashResetToken(rawToken: string): string {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
 }
 
+export interface SessionWithUser {
+  session: SessionPayload;
+  user: Omit<DbUser, "password">;
+}
+
 /**
  * Resolves the active session cookie AND validates user existence, live RBAC role,
- * and `sessionVersion` against PostgreSQL so password resets and role demotions take effect immediately.
- * Wrapped in React `cache()` so multiple calls within the same server render pass execute only once.
+ * and `sessionVersion` against PostgreSQL in a single projection-light query.
+ * Wrapped in React `cache()` so both `getSession()` and `getSessionWithUser()`
+ * share one database lookup per request / server render pass.
  */
-export const getSession = cache(async function getSession(): Promise<SessionPayload | null> {
+export const getSessionWithUser = cache(async function getSessionWithUser(): Promise<SessionWithUser | null> {
   try {
     const cookieStore = await cookies();
     const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
@@ -158,7 +185,7 @@ export const getSession = cache(async function getSession(): Promise<SessionPayl
     const verified = verifySessionToken(token);
     if (!verified) return null;
 
-    const user = await findUserById(verified.userId);
+    const user = await findUserProfileById(verified.userId);
     if (!user) return null;
 
     if (user.sessionVersion !== verified.sessionVersion) {
@@ -166,13 +193,21 @@ export const getSession = cache(async function getSession(): Promise<SessionPayl
     }
 
     return {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-      sessionVersion: user.sessionVersion,
-      exp: verified.exp,
+      session: {
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        sessionVersion: user.sessionVersion,
+        exp: verified.exp,
+      },
+      user,
     };
   } catch {
     return null;
   }
+});
+
+export const getSession = cache(async function getSession(): Promise<SessionPayload | null> {
+  const resolved = await getSessionWithUser();
+  return resolved ? resolved.session : null;
 });

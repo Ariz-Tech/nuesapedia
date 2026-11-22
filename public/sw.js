@@ -1,10 +1,15 @@
-// NUESApedia Service Worker v6 — Privacy-Preserving Offline Caching (Zero Shared-PC Session Leaks)
-const SHELL_CACHE = "nuesapedia-shell-v6";
-const DATA_CACHE = "nuesapedia-public-data-v6";
+// NUESApedia Service Worker v7 — Offline App Shell + Bounded Catalog Cache (Zero Shared-PC Session Leaks)
+const SHELL_CACHE = "nuesapedia-shell-v7";
+const DATA_CACHE = "nuesapedia-public-data-v7";
+const MAX_DATA_CACHE_ENTRIES = 40;
 
+// Strictly static / cookie-free shells (no server-rendered user PII).
+// Precaching /saved and /resources guarantees offline access to the IndexedDB Offline Vault.
 const STATIC_ASSETS = [
   "/manifest.webmanifest",
   "/favicon.ico",
+  "/saved",
+  "/resources",
 ];
 
 const OFFLINE_FALLBACK_HTML = `<!DOCTYPE html>
@@ -31,6 +36,19 @@ const OFFLINE_FALLBACK_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
+async function trimCache(cacheName, maxEntries) {
+  try {
+    const cache = await caches.open(cacheName);
+    const keys = await cache.keys();
+    if (keys.length > maxEntries) {
+      const excess = keys.slice(0, keys.length - maxEntries);
+      await Promise.all(excess.map((k) => cache.delete(k)));
+    }
+  } catch {
+    // Ignore quota/cache errors
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
@@ -38,7 +56,8 @@ self.addEventListener("install", (event) => {
       .then((cache) =>
         Promise.allSettled(
           STATIC_ASSETS.map((url) =>
-            fetch(url, { cache: "reload" }).then((res) => {
+            // Fetch shells with credentials omitted so no session cookie ever contaminates SHELL_CACHE
+            fetch(url, { cache: "reload", credentials: "omit" }).then((res) => {
               if (res.ok) return cache.put(url, res);
             })
           )
@@ -93,12 +112,50 @@ self.addEventListener("fetch", (event) => {
       return;
     }
 
+    // Stale-while-revalidate for low-churn /api/courses and /api/departments
+    if (url.pathname === "/api/courses" || url.pathname === "/api/departments") {
+      event.respondWith(
+        caches.open(DATA_CACHE).then(async (cache) => {
+          const cached = await cache.match(request);
+          const networkPromise = fetch(request)
+            .then((res) => {
+              if (res.ok) {
+                cache.put(request, res.clone());
+                void trimCache(DATA_CACHE, MAX_DATA_CACHE_ENTRIES);
+              }
+              return res;
+            })
+            .catch(() => null);
+
+          if (cached) {
+            event.waitUntil(networkPromise);
+            return cached;
+          }
+          const networkRes = await networkPromise;
+          if (networkRes) return networkRes;
+          return new Response(
+            JSON.stringify({
+              success: false,
+              offline: true,
+              error: { code: "OFFLINE", message: "You are currently offline." },
+            }),
+            { status: 503, headers: { "Content-Type": "application/json" } }
+          );
+        })
+      );
+      return;
+    }
+
+    // Network-first with bounded LRU cache for paginated /api/resources
     event.respondWith(
       fetch(request)
         .then((res) => {
           if (res.ok) {
             const clone = res.clone();
-            caches.open(DATA_CACHE).then((cache) => cache.put(request, clone));
+            caches.open(DATA_CACHE).then((cache) => {
+              cache.put(request, clone);
+              void trimCache(DATA_CACHE, MAX_DATA_CACHE_ENTRIES);
+            });
           }
           return res;
         })
@@ -141,12 +198,19 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Navigation requests: Network-first, fallback to clean offline HTML.
-  // CRITICAL: We NEVER cache user-navigated dynamic HTML in SHELL_CACHE, preventing
-  // session/profile data leakage across different students on shared university PCs.
+  // Navigation requests: Network-first, falling back to precached anonymous app shell
+  // (/saved or /resources) so students can always open their Offline Vault without loops.
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request).catch(() => {
+      fetch(request).catch(async () => {
+        if (url.pathname === "/saved" || url.pathname === "/resources") {
+          const shell = await caches.match(url.pathname);
+          if (shell) return shell;
+        }
+        const savedShell = await caches.match("/saved");
+        if (url.pathname.startsWith("/saved") && savedShell) {
+          return savedShell;
+        }
         return new Response(OFFLINE_FALLBACK_HTML, {
           status: 200,
           headers: { "Content-Type": "text/html; charset=utf-8" },

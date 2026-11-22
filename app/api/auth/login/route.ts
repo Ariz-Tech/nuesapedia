@@ -16,19 +16,6 @@ const DUMMY_SCRYPT_HASH =
 export async function POST(req: Request) {
   try {
     const ip = getClientIp(req);
-    const ipRate = await checkRateLimit(`login:ip:${ip}`, {
-      limit: 10,
-      windowMs: 15 * 60 * 1000,
-    });
-    if (!ipRate.allowed) {
-      return apiError(
-        "RATE_LIMITED",
-        `Too many login attempts. Please try again in ${ipRate.retryAfterSeconds} seconds.`,
-        429,
-        { "Retry-After": String(ipRate.retryAfterSeconds) }
-      );
-    }
-
     const body = await req.json();
     const { email, password } = body ?? {};
 
@@ -47,10 +34,25 @@ export async function POST(req: Request) {
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
-    const emailRate = await checkRateLimit(`login:email:${normalizedEmail}`, {
-      limit: 8,
-      windowMs: 15 * 60 * 1000,
-    });
+    const [ipRate, emailRate] = await Promise.all([
+      checkRateLimit(`login:ip:${ip}`, {
+        limit: 10,
+        windowMs: 15 * 60 * 1000,
+      }),
+      checkRateLimit(`login:email:${normalizedEmail}`, {
+        limit: 8,
+        windowMs: 15 * 60 * 1000,
+      }),
+    ]);
+
+    if (!ipRate.allowed) {
+      return apiError(
+        "RATE_LIMITED",
+        `Too many login attempts. Please try again in ${ipRate.retryAfterSeconds} seconds.`,
+        429,
+        { "Retry-After": String(ipRate.retryAfterSeconds) }
+      );
+    }
     if (!emailRate.allowed) {
       return apiError(
         "RATE_LIMITED",

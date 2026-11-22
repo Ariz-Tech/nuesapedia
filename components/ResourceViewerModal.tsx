@@ -69,6 +69,7 @@ function ResourceViewerModalOpen({
     useSavedResources();
 
   const dialogRef = useRef<HTMLDivElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
   const { createTrackedUrl, revokeTrackedUrl } = useTrackedBlobUrl();
   const [offlineBlobUrl, setOfflineBlobUrl] = useState<string | null>(null);
   const [checkingOffline, setCheckingOffline] = useState<boolean>(
@@ -87,11 +88,12 @@ function ResourceViewerModalOpen({
   const canonicalId = material.resourceId || material.id;
   const isVideo = material.medium === "YOUTUBE";
 
-  // Escape key, Tab focus trap, and body scroll lock
+  // Escape key, initial focus management, Tab focus trap, and body scroll lock
   useEffect(() => {
     const prevActive = document.activeElement as HTMLElement | null;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    closeBtnRef.current?.focus();
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -297,6 +299,7 @@ function ResourceViewerModalOpen({
             </div>
 
             <button
+              ref={closeBtnRef}
               type="button"
               onClick={onClose}
               className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"

@@ -260,20 +260,46 @@ export default function ResourceUploadPortal({
           throw new Error("Server did not return a valid upload session.");
         }
 
-        // Step 2: Stream file directly to Cloudflare R2 (Bypasses Next.js server memory)
-        setUploadProgress(50);
-        const uploadResponse = await fetch(uploadUrl, {
-          method: "PUT",
-          headers: {
-            "Content-Type": file!.type || getMimeTypeForFilename(file!.name),
-          },
-          body: file!,
-        });
-
-        if (!uploadResponse.ok) {
-          throw new Error(
-            "Direct upload to storage failed. Please ensure the file is under 30MB and is a valid format."
-          );
+        // Step 2: Stream file directly to Cloudflare R2 via XHR for real upload progress on slow networks
+        setUploadProgress(22);
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("PUT", uploadUrl, true);
+            xhr.setRequestHeader(
+              "Content-Type",
+              file!.type || getMimeTypeForFilename(file!.name)
+            );
+            xhr.timeout = 5 * 60 * 1000; // 5-minute ceiling for slow 3G uploads
+            xhr.upload.onprogress = (ev) => {
+              if (ev.lengthComputable && ev.total > 0) {
+                const pct = 22 + Math.round((ev.loaded / ev.total) * 60);
+                setUploadProgress(Math.min(82, pct));
+              }
+            };
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve();
+              } else {
+                reject(
+                  new Error(
+                    "Direct upload to storage failed. Please ensure the file is under 30MB and is a valid format."
+                  )
+                );
+              }
+            };
+            xhr.onerror = () =>
+              reject(new Error("Network connection interrupted while uploading file."));
+            xhr.ontimeout = () =>
+              reject(new Error("Upload timed out. Please retry on a steadier connection."));
+            xhr.send(file!);
+          });
+        } catch (uploadErr) {
+          // Clean up orphaned UPLOADING reservation immediately so it doesn't pollute DB/concurrency quota
+          fetch(`/api/uploads?id=${encodeURIComponent(uploadId)}`, {
+            method: "DELETE",
+          }).catch(() => {});
+          throw uploadErr;
         }
 
         // Step 3: Complete upload confirmation and verify PDF magic signature server-side

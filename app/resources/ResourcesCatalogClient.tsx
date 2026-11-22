@@ -1,0 +1,1190 @@
+"use client";
+
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import dynamic from "next/dynamic";
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import ResourceCard, { ResourceCardSkeleton } from "@/components/ResourceCard";
+import { DEPARTMENTS, getDepartmentBySlug, isKnownDepartment } from "@/lib/departments";
+import { resolveCourseMetadata } from "@/lib/courses";
+import {
+  type CourseMaterialItem,
+  normalizeMaterial,
+  shareOrCopyMaterialLink,
+} from "@/lib/saved-client";
+import {
+  cacheCatalogResources,
+  getCachedCatalogResources,
+} from "@/lib/offline-vault";
+import { useSavedResources } from "@/context/SavedResourcesContext";
+import {
+  Search,
+  FileText,
+  Play,
+  Bookmark,
+  CheckCircle2,
+  Layers,
+  Loader2,
+  ArrowRight,
+  RotateCcw,
+  HardDriveDownload,
+  Clock,
+  MessageSquarePlus,
+  X,
+  ArrowUpDown,
+  PackageOpen,
+} from "lucide-react";
+
+const ResourceViewerModal = dynamic(
+  () => import("@/components/ResourceViewerModal"),
+  { ssr: false }
+);
+
+const LEVELS = ["All Levels", "100L", "200L", "300L", "400L", "500L"];
+const SEMESTERS = ["All Semesters", "First Semester", "Second Semester"];
+const CATEGORIES = [
+  "All Categories",
+  "Lecture Note",
+  "Past Question",
+  "Video Tutorial",
+];
+type SortOption = "newest" | "popular" | "course";
+
+function normalizeCategoryParam(raw: string | null): string {
+  if (!raw) return "All Categories";
+  const lower = raw.trim().toLowerCase();
+  if (
+    lower.includes("lecture") ||
+    lower.includes("handout") ||
+    lower.includes("note") ||
+    lower.includes("slide")
+  ) {
+    return "Lecture Note";
+  }
+  if (lower.includes("past")) return "Past Question";
+  if (lower.includes("video")) return "Video Tutorial";
+  const exact = CATEGORIES.find((c) => c.toLowerCase() === lower);
+  return exact || "All Categories";
+}
+
+interface ResourcesCatalogClientProps {
+  initialResources?: CourseMaterialItem[];
+  initialTotal?: number;
+  initialTotalPages?: number;
+  initialFilters: {
+    dept: string;
+    semester: string;
+    course: string;
+    medium: "ALL" | "PDF" | "YOUTUBE" | "OFFLINE";
+    category: string;
+    query: string;
+  };
+}
+
+export default function ResourcesCatalogClient({
+  initialResources,
+  initialTotal = 0,
+  initialTotalPages = 1,
+  initialFilters,
+}: ResourcesCatalogClientProps) {
+  const searchParams = useSearchParams();
+  const {
+    isSaved,
+    toggleSave,
+    savedCount,
+    offlineDocs,
+    offlineCount,
+    isOfflineAvailable,
+    downloadingIds,
+    downloadMaterial,
+    recentReadingIds,
+    isOffline,
+  } = useSavedResources();
+
+  const hasInitialSsr = Array.isArray(initialResources);
+  const [catalogResources, setCatalogResources] = useState<CourseMaterialItem[]>(() =>
+    hasInitialSsr ? initialResources.map((r) => normalizeMaterial(r)) : []
+  );
+  const [loading, setLoading] = useState(!hasInitialSsr);
+
+  // Filters & Sorting
+  const [selectedDept, setSelectedDept] = useState(initialFilters.dept);
+  const [selectedLevel, setSelectedLevel] = useState("All Levels");
+  const [selectedSemester, setSelectedSemester] = useState(initialFilters.semester);
+  const [selectedCourse, setSelectedCourse] = useState(initialFilters.course);
+  const [selectedMedium, setSelectedMedium] = useState<
+    "ALL" | "PDF" | "YOUTUBE" | "OFFLINE"
+  >(initialFilters.medium);
+  const [selectedCategory, setSelectedCategory] = useState(initialFilters.category);
+  const [sortBy, setSortBy] = useState<SortOption>("newest");
+  const [searchQuery, setSearchQuery] = useState(initialFilters.query);
+  // Real 300ms timer debounce prevents keystroke storms against PostgreSQL search
+  const [debouncedQuery, setDebouncedQuery] = useState(initialFilters.query);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(initialTotalPages);
+  const [totalCount, setTotalCount] = useState(initialTotal);
+
+  // Synchronize client-side URL query updates (e.g. Navbar search) without unmounting the page tree
+  const urlSearchKey = searchParams.toString();
+  const [prevUrlSearchKey, setPrevUrlSearchKey] = useState(urlSearchKey);
+  if (urlSearchKey !== prevUrlSearchKey) {
+    setPrevUrlSearchKey(urlSearchKey);
+
+    const dept = searchParams.get("dept") || searchParams.get("department");
+    if (dept) {
+      const bySlug = getDepartmentBySlug(dept);
+      const byName = DEPARTMENTS.find((d) => d.toLowerCase() === dept.toLowerCase());
+      setSelectedDept(bySlug?.name || byName || dept);
+    } else {
+      setSelectedDept("All Departments");
+    }
+    const sem = searchParams.get("semester");
+    setSelectedSemester(sem && SEMESTERS.includes(sem) ? sem : "All Semesters");
+    const course = searchParams.get("course");
+    setSelectedCourse(course ? course.toUpperCase() : "All Courses");
+    const medium = searchParams.get("medium");
+    setSelectedMedium(
+      medium === "PDF" || medium === "YOUTUBE" || medium === "OFFLINE" ? medium : "ALL"
+    );
+    const category = searchParams.get("category");
+    setSelectedCategory(category ? normalizeCategoryParam(category) : "All Categories");
+    const q = searchParams.get("search") ?? searchParams.get("q") ?? "";
+    setSearchQuery(q);
+    setDebouncedQuery(q);
+    setCurrentPage(1);
+  }
+
+  // Reset pagination on filter changes without cascading effect setState
+  const filterKey = `${selectedDept}|${selectedLevel}|${selectedSemester}|${selectedCourse}|${selectedMedium}|${selectedCategory}|${debouncedQuery}|${sortBy}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
+    setCurrentPage(1);
+  }
+
+  // Skip the very first client fetch when SSR already provided exact data for initial filters
+  const initialRequestKey = `${initialFilters.dept}|All Levels|${initialFilters.semester}|${initialFilters.course}|${initialFilters.medium}|${initialFilters.category}|${initialFilters.query}|newest|1`;
+  const skipFirstFetchRef = useRef(hasInitialSsr && initialFilters.medium !== "OFFLINE");
+
+  // Active Bookmark / Download / Share / Course Pack Toast & Viewer Modal
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [activeMaterial, setActiveMaterial] = useState<CourseMaterialItem | null>(() => {
+    const openId = searchParams.get("open");
+    if (!openId || !hasInitialSsr || !initialResources) return null;
+    const found = initialResources.find((r) => (r.resourceId || r.id) === openId);
+    return found ? normalizeMaterial(found) : null;
+  });
+  const [downloadingPack, setDownloadingPack] = useState<boolean>(false);
+
+  // Request Missing Material Modal
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [reqCourseCode, setReqCourseCode] = useState("");
+  const [reqDepartment, setReqDepartment] = useState<string>(DEPARTMENTS[0]);
+  const [reqLevel, setReqLevel] = useState("200L");
+  const [reqType, setReqType] = useState("Past Question");
+  const [reqDetails, setReqDetails] = useState("");
+  const [submittingRequest, setSubmittingRequest] = useState(false);
+
+  // Cache SSR-hydrated catalog into IndexedDB once in the background
+  useEffect(() => {
+    if (!hasInitialSsr || !initialResources || initialResources.length === 0) return;
+    const normalized = initialResources.map((r) => normalizeMaterial(r));
+    cacheCatalogResources(normalized).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!showRequestModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowRequestModal(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showRequestModal]);
+
+  // Fetch approved course materials from API ONLY when filter/pagination inputs change.
+  // Deliberately decoupled from `offlineDocs` / `refreshSaved` so downloads & progress updates
+  // never trigger full-page skeleton flashes or duplicate API storms.
+  useEffect(() => {
+    if (selectedMedium === "OFFLINE") {
+      return;
+    }
+
+    const requestKey = `${filterKey}|${currentPage}`;
+    if (skipFirstFetchRef.current && requestKey === initialRequestKey) {
+      skipFirstFetchRef.current = false;
+      return;
+    }
+    skipFirstFetchRef.current = false;
+
+    let mounted = true;
+    const controller = new AbortController();
+
+    async function loadData() {
+      setLoading(true);
+      try {
+        let normalized: CourseMaterialItem[] = [];
+        let fetchedOnline = false;
+
+        if (typeof navigator === "undefined" || navigator.onLine) {
+          try {
+            const params = new URLSearchParams();
+            params.set("page", String(currentPage));
+            params.set("limit", "24");
+            if (selectedDept !== "All Departments") params.set("department", selectedDept);
+            if (selectedLevel !== "All Levels") params.set("level", selectedLevel);
+            if (selectedSemester !== "All Semesters") params.set("semester", selectedSemester);
+            if (selectedCourse !== "All Courses") params.set("course", selectedCourse);
+            if (selectedCategory !== "All Categories") params.set("type", selectedCategory);
+            if (selectedMedium !== "ALL") params.set("medium", selectedMedium);
+            if (debouncedQuery.trim()) params.set("query", debouncedQuery.trim());
+            params.set("sort", sortBy);
+
+            const res = await fetch(`/api/resources?${params.toString()}`, {
+              signal: controller.signal,
+            });
+            const data = res.ok ? await res.json() : null;
+            const list = Array.isArray(data?.resources)
+              ? data.resources
+              : Array.isArray(data?.data)
+                ? data.data
+                : [];
+            if (data?.success) {
+              normalized = list.map((r: CourseMaterialItem) => normalizeMaterial(r));
+              fetchedOnline = true;
+              if (mounted) {
+                setTotalCount(Number(data.pagination?.total) ?? normalized.length);
+                setTotalPages(Number(data.pagination?.totalPages) || 1);
+              }
+              if (normalized.length > 0) {
+                cacheCatalogResources(normalized).catch(() => {});
+              }
+            }
+          } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") return;
+            fetchedOnline = false;
+          }
+        }
+
+        // Only fall back to IndexedDB cached catalog when actually offline / network failed
+        // (never overwrite legitimate empty online search results).
+        if (!fetchedOnline) {
+          const cached = await getCachedCatalogResources();
+          if (cached.length > 0) {
+            normalized = cached;
+            if (mounted) {
+              setTotalCount(cached.length);
+              setTotalPages(Math.max(1, Math.ceil(cached.length / 24)));
+            }
+          }
+        }
+
+        if (!mounted) return;
+        setCatalogResources(normalized);
+
+        const openId = new URLSearchParams(window.location.search).get("open");
+        if (openId) {
+          const found = normalized.find((r) => (r.resourceId || r.id) === openId);
+          if (found) setActiveMaterial(found);
+        }
+      } catch (err) {
+        console.error("Failed to fetch course materials:", err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    void loadData();
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
+  }, [
+    currentPage,
+    selectedDept,
+    selectedLevel,
+    selectedSemester,
+    selectedCourse,
+    selectedMedium,
+    selectedCategory,
+    debouncedQuery,
+    sortBy,
+    filterKey,
+    initialRequestKey,
+  ]);
+
+  // Merge live/cached catalog with IndexedDB metadata so downloaded PDFs are ALWAYS visible offline
+  const allResources = useMemo(() => {
+    const map = new Map<string, CourseMaterialItem>();
+    for (const item of catalogResources) {
+      map.set(item.id, item);
+    }
+    for (const doc of offlineDocs) {
+      if (doc.material && !map.has(doc.id)) {
+        map.set(doc.id, normalizeMaterial(doc.material));
+      }
+    }
+    return Array.from(map.values());
+  }, [catalogResources, offlineDocs]);
+
+  // Recently opened / Continue Reading items (up to 3)
+  const continueReadingItems = useMemo(() => {
+    if (recentReadingIds.length === 0 || allResources.length === 0) return [];
+    const lookup = new Map(allResources.map((r) => [r.resourceId || r.id, r]));
+    const items: CourseMaterialItem[] = [];
+    for (const id of recentReadingIds) {
+      const found = lookup.get(id);
+      if (found) items.push(found);
+      if (items.length >= 3) break;
+    }
+    return items;
+  }, [recentReadingIds, allResources]);
+
+  // Dynamically derive available courses from loaded materials
+  const availableCourses = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of allResources) {
+      if (selectedDept !== "All Departments" && item.department !== selectedDept) continue;
+      if (selectedLevel !== "All Levels" && item.level !== selectedLevel) continue;
+      if (selectedSemester !== "All Semesters" && item.semester !== selectedSemester) continue;
+      const code = item.courseCode.trim().toUpperCase();
+      if (!map.has(code)) {
+        const meta = resolveCourseMetadata(code, {
+          department: item.department,
+          level: item.level,
+          semester: item.semester,
+        });
+        map.set(code, meta.title);
+      }
+    }
+    return Array.from(map.entries())
+      .map(([code, title]) => ({ code, title }))
+      .sort((a, b) => a.code.localeCompare(b.code));
+  }, [allResources, selectedDept, selectedLevel, selectedSemester]);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    window.setTimeout(() => setToastMsg(null), 3400);
+  }, []);
+
+  const handleToggleBookmark = useCallback(
+    async (item: CourseMaterialItem) => {
+      const key = item.resourceId || item.id;
+      try {
+        setTogglingId(key);
+        const nowSaved = await toggleSave(item);
+        showToast(
+          nowSaved
+            ? `Saved "${item.title}" to your Saved materials`
+            : `Removed "${item.title}" from Saved`
+        );
+      } catch (err) {
+        console.error("Bookmark toggle error:", err);
+      } finally {
+        setTogglingId(null);
+      }
+    },
+    [toggleSave, showToast]
+  );
+
+  const handleDownload = useCallback(
+    async (item: CourseMaterialItem) => {
+      const res = await downloadMaterial(item, { saveToDevice: true });
+      if (res.ok) {
+        showToast(
+          res.fromCache
+            ? `Downloaded "${item.title}" from Offline Vault`
+            : `Downloaded "${item.title}" & saved for offline reading`
+        );
+      } else if (res.error) {
+        showToast(res.error);
+      }
+    },
+    [downloadMaterial, showToast]
+  );
+
+  const handleShare = useCallback(
+    async (item: CourseMaterialItem) => {
+      const key = item.resourceId || item.id;
+      await shareOrCopyMaterialLink(item);
+      setCopiedId(key);
+      showToast(`Copied direct link to "${item.courseCode} — ${item.title}"`);
+      window.setTimeout(() => setCopiedId(null), 2200);
+    },
+    [showToast]
+  );
+
+  const handleSubmitMaterialRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reqCourseCode.trim()) return;
+    try {
+      setSubmittingRequest(true);
+      const res = await fetch("/api/requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courseCode: reqCourseCode.trim().toUpperCase(),
+          department: reqDepartment,
+          level: reqLevel,
+          type: reqType,
+          details: reqDetails.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setShowRequestModal(false);
+        setReqCourseCode("");
+        setReqDetails("");
+        showToast("Material request sent to faculty moderators & student contributors!");
+      } else {
+        showToast(data?.error?.message || "Could not submit request right now.");
+      }
+    } finally {
+      setSubmittingRequest(false);
+    }
+  };
+
+  const resetAllFilters = () => {
+    setSelectedDept("All Departments");
+    setSelectedLevel("All Levels");
+    setSelectedSemester("All Semesters");
+    setSelectedCourse("All Courses");
+    setSelectedMedium("ALL");
+    setSelectedCategory("All Categories");
+    setSearchQuery("");
+    setDebouncedQuery("");
+    setCurrentPage(1);
+  };
+
+  const hasActiveFilters =
+    selectedDept !== "All Departments" ||
+    selectedLevel !== "All Levels" ||
+    selectedSemester !== "All Semesters" ||
+    selectedCourse !== "All Courses" ||
+    selectedMedium !== "ALL" ||
+    selectedCategory !== "All Categories" ||
+    Boolean(searchQuery.trim());
+
+  const filteredResources = useMemo(() => {
+    // When online and not specifically filtering local Offline Vault, PostgreSQL already executed exact filtering & sorting
+    if (!isOffline && selectedMedium !== "OFFLINE") {
+      return catalogResources;
+    }
+
+    const sourceList =
+      selectedMedium === "OFFLINE"
+        ? offlineDocs
+            .map((doc) => (doc.material ? normalizeMaterial(doc.material) : null))
+            .filter((m): m is CourseMaterialItem => m !== null)
+        : allResources;
+
+    const matches = sourceList.filter((item) => {
+      const canonicalId = item.resourceId || item.id;
+      if (selectedDept !== "All Departments" && item.department !== selectedDept) return false;
+      if (selectedLevel !== "All Levels" && item.level !== selectedLevel) return false;
+      if (selectedSemester !== "All Semesters" && item.semester !== selectedSemester) return false;
+      if (
+        selectedCourse !== "All Courses" &&
+        item.courseCode.trim().toUpperCase() !== selectedCourse
+      ) {
+        return false;
+      }
+      if (selectedMedium === "OFFLINE") {
+        if (!isOfflineAvailable(canonicalId)) return false;
+      } else if (selectedMedium !== "ALL" && item.medium !== selectedMedium) {
+        return false;
+      }
+      if (selectedCategory !== "All Categories") {
+        const catNeedle = selectedCategory.toLowerCase().replace(/s$/, "");
+        const itemType = item.type.toLowerCase();
+        if (selectedCategory === "Video Tutorial") {
+          if (item.medium !== "YOUTUBE" && !itemType.includes("video")) return false;
+        } else if (!itemType.includes(catNeedle)) {
+          return false;
+        }
+      }
+      if (debouncedQuery.trim()) {
+        const q = debouncedQuery.toLowerCase().trim();
+        const compactQ = q.replace(/\s+/g, "");
+        const courseTitle = resolveCourseMetadata(item.courseCode).title.toLowerCase();
+        const codeLower = item.courseCode.toLowerCase();
+        const mTitle = item.title.toLowerCase().includes(q);
+        const mCode = codeLower.includes(q) || codeLower.replace(/\s+/g, "").includes(compactQ);
+        const mCourseName = courseTitle.includes(q);
+        const mDept = item.department.toLowerCase().includes(q);
+        const mDesc = (item.description || "").toLowerCase().includes(q);
+        const mSession = (item.sessionYear || "").toLowerCase().includes(q);
+        if (!mTitle && !mCode && !mCourseName && !mDept && !mDesc && !mSession) return false;
+      }
+      return true;
+    });
+
+    const sorted = [...matches];
+    if (sortBy === "popular") {
+      sorted.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
+    } else if (sortBy === "course") {
+      sorted.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
+    } else {
+      sorted.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    }
+    return sorted;
+  }, [
+    isOffline,
+    offlineDocs,
+    allResources,
+    catalogResources,
+    selectedDept,
+    selectedLevel,
+    selectedSemester,
+    selectedCourse,
+    selectedMedium,
+    selectedCategory,
+    debouncedQuery,
+    sortBy,
+    isOfflineAvailable,
+  ]);
+
+  // Uncached PDFs for active course (for 1-click "Save Course Pack Offline")
+  const uncachedCoursePdfs = useMemo(() => {
+    if (selectedCourse === "All Courses") return [];
+    return filteredResources.filter(
+      (r) =>
+        r.medium !== "YOUTUBE" &&
+        Boolean(r.fileUrl) &&
+        !isOfflineAvailable(r.resourceId || r.id)
+    );
+  }, [selectedCourse, filteredResources, isOfflineAvailable]);
+
+  const handleSaveCoursePackOffline = async () => {
+    if (uncachedCoursePdfs.length === 0 || downloadingPack) return;
+    setDownloadingPack(true);
+    let savedOk = 0;
+    try {
+      // Bounded concurrency (2 parallel downloads) balances speed and mobile memory
+      const queue = [...uncachedCoursePdfs];
+      const workers = Array.from({ length: Math.min(2, queue.length) }, async () => {
+        while (queue.length > 0) {
+          const pdf = queue.shift();
+          if (!pdf) break;
+          const res = await downloadMaterial(pdf, { saveToDevice: false });
+          if (res.ok) savedOk++;
+        }
+      });
+      await Promise.all(workers);
+      showToast(
+        savedOk > 0
+          ? `Saved ${savedOk} ${selectedCourse} ${savedOk === 1 ? "PDF" : "PDFs"} into your Offline Vault!`
+          : "Could not cache course PDFs right now."
+      );
+    } finally {
+      setDownloadingPack(false);
+    }
+  };
+
+  const isLoading = loading && selectedMedium !== "OFFLINE";
+  const displayTotal =
+    selectedMedium === "OFFLINE" || isOffline
+      ? filteredResources.length
+      : totalCount;
+
+  return (
+    <div className="min-h-screen bg-[#FAFAFA] flex flex-col justify-between">
+      <Navbar />
+
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+        {/* Header & Unified Course Material Filter Bar */}
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-10 shadow-xs mb-6">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-8 h-8 rounded-xl bg-[#0C3B2E] text-white flex items-center justify-center shadow-xs">
+                  <Layers className="w-4 h-4 text-emerald-400" />
+                </span>
+                <span className="text-xs font-bold uppercase tracking-wider text-[#00875A]">
+                  Digital Faculty Repository
+                </span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-[#0C3B2E] tracking-tight">
+                Course Materials &amp; Resources
+              </h1>
+              <p className="mt-1 text-xs sm:text-sm text-slate-500 max-w-2xl">
+                View all engineering course materials in one place — click any material to read documents, watch video lectures, bookmark to Saved, or download for offline reading.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              {!isOffline && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (selectedDept !== "All Departments" && isKnownDepartment(selectedDept)) {
+                      setReqDepartment(selectedDept);
+                    }
+                    if (selectedCourse !== "All Courses") {
+                      setReqCourseCode(selectedCourse);
+                    } else if (searchQuery.trim()) {
+                      setReqCourseCode(searchQuery.trim().toUpperCase().slice(0, 12));
+                    }
+                    setShowRequestModal(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 bg-surface hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition-colors shadow-2xs cursor-pointer"
+                >
+                  <MessageSquarePlus className="w-4 h-4 text-brand-emerald" />
+                  <span>Request Material</span>
+                </button>
+              )}
+              <Link
+                href="/saved"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 bg-surface hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition-colors shadow-2xs"
+              >
+                <Bookmark className="w-4 h-4 text-brand-emerald" />
+                <span>Saved ({savedCount})</span>
+              </Link>
+              <Link
+                href="/upload"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand-emerald hover:bg-brand-emerald-hover text-white text-xs sm:text-sm font-semibold transition-colors shadow-xs"
+              >
+                <span>Contribute Material</span>
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+          </div>
+
+          {/* Search & Dropdown Filters */}
+          <div className="mt-7 pt-6 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-12 gap-3">
+            <div className="relative sm:col-span-2 lg:col-span-6 xl:col-span-4">
+              <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                aria-label="Search materials by course code, name, or topic"
+                placeholder="Search course code, course name, topic..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald transition-all"
+              />
+            </div>
+
+            <select
+              aria-label="Filter by department"
+              value={selectedDept}
+              onChange={(e) => {
+                setSelectedDept(e.target.value);
+                setSelectedCourse("All Courses");
+              }}
+              className="w-full lg:col-span-2 xl:col-span-2 px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
+            >
+              <option value="All Departments">All Departments</option>
+              {DEPARTMENTS.map((dept) => (
+                <option key={dept} value={dept}>
+                  {dept}
+                </option>
+              ))}
+            </select>
+
+            <select
+              aria-label="Filter by academic level"
+              value={selectedLevel}
+              onChange={(e) => {
+                setSelectedLevel(e.target.value);
+                setSelectedCourse("All Courses");
+              }}
+              className="w-full lg:col-span-1 xl:col-span-1 px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
+            >
+              {LEVELS.map((lvl) => (
+                <option key={lvl} value={lvl}>
+                  {lvl}
+                </option>
+              ))}
+            </select>
+
+            <select
+              aria-label="Filter by semester"
+              value={selectedSemester}
+              onChange={(e) => {
+                setSelectedSemester(e.target.value);
+                setSelectedCourse("All Courses");
+              }}
+              className="w-full lg:col-span-1 xl:col-span-2 px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
+            >
+              {SEMESTERS.map((sem) => (
+                <option key={sem} value={sem}>
+                  {sem}
+                </option>
+              ))}
+            </select>
+
+            <select
+              aria-label="Filter by course code"
+              value={selectedCourse}
+              onChange={(e) => setSelectedCourse(e.target.value)}
+              className="w-full lg:col-span-1 xl:col-span-2 px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
+            >
+              <option value="All Courses">All Courses ({availableCourses.length})</option>
+              {availableCourses.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.code} — {c.title}
+                </option>
+              ))}
+            </select>
+
+            <select
+              aria-label="Filter by media format"
+              value={selectedMedium}
+              onChange={(e) =>
+                setSelectedMedium(
+                  e.target.value as "ALL" | "PDF" | "YOUTUBE" | "OFFLINE"
+                )
+              }
+              className="w-full lg:col-span-1 xl:col-span-1 px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 bg-surface focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
+            >
+              <option value="ALL">All Formats</option>
+              <option value="PDF">Documents</option>
+              <option value="YOUTUBE">Videos</option>
+              <option value="OFFLINE">Offline ({offlineCount})</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Toast Feedback */}
+        {toastMsg && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-5 px-4 py-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs sm:text-sm font-semibold flex items-center justify-between"
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-[#00875A] shrink-0" />
+              <span>{toastMsg}</span>
+            </div>
+            <Link
+              href="/saved"
+              className="text-[#00875A] hover:underline text-xs font-bold ml-4 shrink-0"
+            >
+              View Saved
+            </Link>
+          </div>
+        )}
+
+        {/* Continue Reading Strip */}
+        {!isLoading && !hasActiveFilters && continueReadingItems.length > 0 && (
+          <div className="mb-6 bg-white border border-slate-200/80 rounded-2xl p-4 shadow-2xs">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
+              <Clock className="w-3.5 h-3.5 text-[#00875A]" />
+              <span>Continue Reading</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {continueReadingItems.map((recent) => {
+                const rid = recent.resourceId || recent.id;
+                const isVid = recent.medium === "YOUTUBE";
+                return (
+                  <button
+                    key={rid}
+                    type="button"
+                    onClick={() => setActiveMaterial(recent)}
+                    className="flex items-center gap-3 p-3 rounded-xl border border-slate-200/80 hover:border-[#00875A]/50 hover:bg-emerald-50/30 transition-all text-left cursor-pointer group"
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-emerald-50 text-[#00875A] flex items-center justify-center shrink-0">
+                      {isVid ? (
+                        <Play className="w-4 h-4 fill-current" />
+                      ) : (
+                        <FileText className="w-4 h-4" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-bold font-mono text-brand-forest">
+                          {recent.courseCode}
+                        </span>
+                        {isOfflineAvailable(rid) && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-brand-emerald">
+                            Offline
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs font-bold text-slate-800 group-hover:text-[#00875A] truncate">
+                        {recent.title}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Categories, Course Pack Offline Button & Sort Row */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-6">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+            {CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+                  selectedCategory === cat && selectedMedium !== "OFFLINE"
+                    ? "bg-[#0C3B2E] text-white shadow-2xs"
+                    : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={() =>
+                setSelectedMedium((prev) => (prev === "OFFLINE" ? "ALL" : "OFFLINE"))
+              }
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+                selectedMedium === "OFFLINE"
+                  ? "bg-[#00875A] text-white shadow-2xs"
+                  : "bg-emerald-50 border border-emerald-200 text-[#0C3B2E] hover:bg-emerald-100"
+              }`}
+            >
+              <HardDriveDownload className="w-3.5 h-3.5" />
+              <span>Downloaded ({offlineCount})</span>
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 font-medium shrink-0">
+            {!isOffline && uncachedCoursePdfs.length > 0 && (
+              <button
+                type="button"
+                disabled={downloadingPack}
+                onClick={handleSaveCoursePackOffline}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#00875A] hover:bg-[#00734c] disabled:opacity-60 text-white text-xs font-bold shadow-2xs transition-all cursor-pointer"
+              >
+                {downloadingPack ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <PackageOpen className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {downloadingPack
+                    ? `Saving ${selectedCourse}...`
+                    : `Save ${selectedCourse} Offline (${uncachedCoursePdfs.length} PDFs)`}
+                </span>
+              </button>
+            )}
+
+            <div className="inline-flex items-center gap-1.5 bg-surface border border-slate-200 rounded-xl px-2.5 py-1.5 focus-within:border-brand-emerald focus-within:ring-2 focus-within:ring-brand-emerald/15">
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortOption)}
+                aria-label="Sort course materials"
+                className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none focus-visible:outline-none cursor-pointer"
+              >
+                <option value="newest">Newest First</option>
+                <option value="popular">Most Downloaded</option>
+                <option value="course">Course Code (A–Z)</option>
+              </select>
+            </div>
+
+            {!isLoading && (
+              <span>
+                Showing <strong className="text-slate-900">{displayTotal}</strong>{" "}
+                {displayTotal === 1 ? "material" : "materials"}
+              </span>
+            )}
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={resetAllFilters}
+                className="inline-flex items-center gap-1 text-brand-emerald font-semibold hover:underline cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Resources Grid */}
+        {isLoading ? (
+          <div
+            role="status"
+            aria-label="Loading course materials"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+          >
+            {[1, 2, 3, 4, 5, 6].map((idx) => (
+              <ResourceCardSkeleton key={idx} />
+            ))}
+          </div>
+        ) : filteredResources.length === 0 ? (
+          <div className="bg-surface border border-dashed border-slate-300 rounded-3xl p-12 sm:p-16 text-center">
+            <FileText className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+            <h3 className="text-base sm:text-lg font-bold text-brand-forest mb-1.5">
+              {selectedMedium === "OFFLINE"
+                ? "No downloaded documents yet"
+                : "No course materials found"}
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto mb-6 leading-relaxed">
+              {selectedMedium === "OFFLINE"
+                ? "Click Download on any handout, past question, or document to save it into your offline vault for reading without internet."
+                : hasActiveFilters
+                  ? "No materials matched your active filters. Reset filters or request this course material from peers and moderators."
+                  : isOffline
+                    ? "You are currently offline and no materials have been cached yet. Connect once and download documents to view them offline."
+                    : "No approved course materials are in the repository yet. Contribute the first lecture note, past question, or video tutorial."}
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={resetAllFilters}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 bg-surface hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  Clear Filters
+                </button>
+              )}
+              {!isOffline && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (searchQuery.trim()) {
+                        setReqCourseCode(searchQuery.trim().toUpperCase().slice(0, 12));
+                      }
+                      setShowRequestModal(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-brand-forest text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    <MessageSquarePlus className="w-3.5 h-3.5 text-brand-emerald" />
+                    <span>Request This Material</span>
+                  </button>
+                  <Link
+                    href="/upload"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-emerald hover:bg-brand-emerald-hover text-white text-xs font-semibold transition-colors"
+                  >
+                    <span>Submit Material</span>
+                  </Link>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredResources.map((item) => {
+                const canonicalId = item.resourceId || item.id;
+                return (
+                  <ResourceCard
+                    key={canonicalId}
+                    item={item}
+                    isBookmarked={isSaved(canonicalId)}
+                    isCachedOffline={isOfflineAvailable(canonicalId)}
+                    isDownloading={downloadingIds.has(canonicalId)}
+                    isTogglingBookmark={togglingId === canonicalId}
+                    isCopied={copiedId === canonicalId}
+                    isOfflineMode={isOffline}
+                    onOpen={setActiveMaterial}
+                    onToggleBookmark={handleToggleBookmark}
+                    onDownload={handleDownload}
+                    onShare={handleShare}
+                  />
+                );
+              })}
+            </div>
+
+            {/* Server-backed Pagination Controls */}
+            {selectedMedium !== "OFFLINE" && totalPages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-slate-200">
+                <div className="text-xs text-slate-500 font-medium">
+                  Showing page <strong className="text-slate-900">{currentPage}</strong> of{" "}
+                  <strong className="text-slate-900">{totalPages}</strong> (
+                  {displayTotal} {displayTotal === 1 ? "material" : "materials"})
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={currentPage <= 1 || loading}
+                    onClick={() => {
+                      setCurrentPage((p) => Math.max(1, p - 1));
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer shadow-2xs transition-all"
+                  >
+                    Previous Page
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentPage >= totalPages || loading}
+                    onClick={() => {
+                      setCurrentPage((p) => Math.min(totalPages, p + 1));
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    className="px-4 py-2 rounded-xl bg-[#00875A] hover:bg-[#00734c] text-white text-xs font-bold disabled:opacity-40 cursor-pointer shadow-2xs transition-all"
+                  >
+                    Next Page
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+
+      {/* Request Missing Material Modal */}
+      {showRequestModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="request-modal-title"
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowRequestModal(false);
+          }}
+        >
+          <div className="bg-surface border border-slate-200 rounded-3xl p-6 sm:p-8 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-[var(--shadow-modal)] animate-ui-scale">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#00875A]">
+                  Student Request Board
+                </span>
+                <h3
+                  id="request-modal-title"
+                  className="text-lg font-extrabold text-[#0C3B2E] mt-0.5"
+                >
+                  Request Missing Course Material
+                </h3>
+              </div>
+              <button
+                type="button"
+                aria-label="Close request modal"
+                onClick={() => setShowRequestModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitMaterialRequest} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Course Code <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. MEE 305"
+                    value={reqCourseCode}
+                    onChange={(e) => setReqCourseCode(e.target.value.toUpperCase())}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold uppercase text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Academic Level
+                  </label>
+                  <select
+                    value={reqLevel}
+                    onChange={(e) => setReqLevel(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 bg-white"
+                  >
+                    {["100L", "200L", "300L", "400L", "500L"].map((lvl) => (
+                      <option key={lvl} value={lvl}>
+                        {lvl}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Department
+                </label>
+                <select
+                  value={reqDepartment}
+                  onChange={(e) => setReqDepartment(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 bg-white"
+                >
+                  {DEPARTMENTS.map((dept) => (
+                    <option key={dept} value={dept}>
+                      {dept}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Needed Material Type
+                </label>
+                <select
+                  value={reqType}
+                  onChange={(e) => setReqType(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 bg-white"
+                >
+                  <option value="Past Question">Past Question</option>
+                  <option value="Lecture Note">Lecture Note / Handout</option>
+                  <option value="Video Tutorial">Video Tutorial</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Details / Session Needed (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={reqDetails}
+                  onChange={(e) => setReqDetails(e.target.value)}
+                  placeholder="e.g. 2023/2024 Second Semester Past Questions or Dr. Adeyemi's slides"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-[#00875A]/20"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRequestModal(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingRequest || !reqCourseCode.trim()}
+                  className="px-5 py-2 rounded-xl bg-[#00875A] hover:bg-[#00734c] disabled:opacity-60 text-white text-xs font-bold shadow-xs cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  {submittingRequest && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Submit Request</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Lazy-loaded In-Page Reader & Video Player Modal */}
+      {activeMaterial && (
+        <ResourceViewerModal
+          material={activeMaterial}
+          isBookmarked={isSaved(activeMaterial.resourceId || activeMaterial.id)}
+          isTogglingBookmark={
+            togglingId === (activeMaterial.resourceId || activeMaterial.id)
+          }
+          onToggleBookmark={handleToggleBookmark}
+          onClose={() => setActiveMaterial(null)}
+        />
+      )}
+
+      <Footer />
+    </div>
+  );
+}

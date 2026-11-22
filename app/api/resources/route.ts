@@ -1,5 +1,6 @@
 import { getApprovedResourcesPaginated, toPublicResource } from "@/lib/db";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
+import { PUBLIC_CATALOG_CACHE_HEADERS } from "@/lib/cache";
 
 /**
  * GET /api/resources
@@ -40,15 +41,19 @@ export async function GET(req: Request) {
       limit,
     });
 
-    return apiSuccess({
-      resources: result.resources.map(toPublicResource),
-      pagination: {
-        page: result.page,
-        limit: result.limit,
-        total: result.total,
-        totalPages: result.totalPages,
+    return apiSuccess(
+      {
+        resources: result.resources.map(toPublicResource),
+        pagination: {
+          page: result.page,
+          limit: result.limit,
+          total: result.total,
+          totalPages: result.totalPages,
+        },
       },
-    });
+      200,
+      PUBLIC_CATALOG_CACHE_HEADERS
+    );
   } catch (error) {
     console.error("GET /api/resources error:", error);
     return apiError(

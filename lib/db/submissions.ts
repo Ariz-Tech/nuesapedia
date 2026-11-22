@@ -2,6 +2,10 @@ import crypto from "node:crypto";
 import { cache } from "react";
 import { resolveCourseMetadata } from "../courses";
 import { parseSizeToBytes } from "../api-helpers";
+import {
+  clearInProcessCoursesCache,
+  getInProcessCoursesCache,
+} from "../cache";
 import { devStore, getReadyDb, isDevMemoryMode } from "./pool";
 import type {
   DbCourse,
@@ -152,6 +156,71 @@ export async function getUserSubmissions(userId: string): Promise<DbSubmission[]
   return res.rows.map(mapSubmissionRow);
 }
 
+/**
+ * Counts active in-flight upload reservations (`status = 'UPLOADING'`) for a user
+ * using the partial index `idx_submissions_user_uploading` instead of scanning 200 rows.
+ */
+export async function countUserUploadingSubmissions(
+  userId: string
+): Promise<number> {
+  if (isDevMemoryMode()) {
+    let count = 0;
+    for (const s of devStore.submissions) {
+      if (s.userId === userId && s.status === "UPLOADING") count += 1;
+    }
+    return count;
+  }
+
+  const db = await getReadyDb();
+  const res = await db.query(
+    `SELECT COUNT(*)::int AS count
+     FROM submissions
+     WHERE user_id = $1 AND status = 'UPLOADING'`,
+    [userId]
+  );
+
+  return Number(res.rows[0]?.count ?? 0);
+}
+
+export async function getModerationStatusCounts(): Promise<{
+  pending: number;
+  approved: number;
+  rejected: number;
+  total: number;
+}> {
+  if (isDevMemoryMode()) {
+    let pending = 0;
+    let approved = 0;
+    let rejected = 0;
+    for (const s of devStore.submissions) {
+      if (s.status === "PENDING_REVIEW") pending += 1;
+      else if (s.status === "APPROVED") approved += 1;
+      else if (s.status === "REJECTED") rejected += 1;
+    }
+    return { pending, approved, rejected, total: pending + approved + rejected };
+  }
+
+  const db = await getReadyDb();
+  const res = await db.query(
+    `SELECT status, COUNT(*)::int AS count
+     FROM submissions
+     WHERE status <> 'UPLOADING'
+     GROUP BY status`
+  );
+
+  let pending = 0;
+  let approved = 0;
+  let rejected = 0;
+  for (const row of res.rows) {
+    const c = Number(row.count ?? 0);
+    if (row.status === "PENDING_REVIEW") pending = c;
+    else if (row.status === "APPROVED") approved = c;
+    else if (row.status === "REJECTED") rejected = c;
+  }
+
+  return { pending, approved, rejected, total: pending + approved + rejected };
+}
+
 export async function createSubmission(data: {
   id?: string;
   userId: string;
@@ -295,29 +364,21 @@ export async function deleteSubmissionWithChecks(
   }
 
   const db = await getReadyDb();
-  const client = await db.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(`DELETE FROM saved_resources WHERE resource_id = $1`, [submissionId]);
-    await client.query(`DELETE FROM reading_progress WHERE resource_id = $1`, [submissionId]);
-    await client.query(`DELETE FROM resource_reports WHERE resource_id = $1`, [submissionId]);
+  // `saved_resources`, `reading_progress`, and `resource_reports` define ON DELETE CASCADE
+  // foreign keys in schema.sql, so a single DELETE avoids 5 extra round-trips and pool lock time.
+  const res = await db.query(
+    `DELETE FROM submissions WHERE id = $1 RETURNING id`,
+    [submissionId]
+  );
 
-    const res = await client.query(
-      `DELETE FROM submissions WHERE id = $1 RETURNING id`,
-      [submissionId]
-    );
-    await client.query("COMMIT");
-
-    return {
-      deleted: (res.rowCount ?? 0) > 0,
-      r2Key: existing.r2Key,
-    };
-  } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw err;
-  } finally {
-    client.release();
+  if ((res.rowCount ?? 0) > 0) {
+    clearInProcessCoursesCache();
   }
+
+  return {
+    deleted: (res.rowCount ?? 0) > 0,
+    r2Key: existing.r2Key,
+  };
 }
 
 /**
@@ -544,14 +605,31 @@ export async function updateSubmissionStatus(
   return res.rows[0] ? mapSubmissionRow(res.rows[0]) : null;
 }
 
+const COURSES_CACHE_TTL_MS = 30_000;
+
+const PUBLIC_LIST_COLUMNS = `
+  id, user_id, title, course_code, department, level, semester, session_year,
+  type, medium, description, file_url, file_name, file_size, file_size_bytes,
+  r2_key, youtube_url, youtube_video_id, thumbnail_url, status, downloads, created_at
+`;
+
 /**
  * Returns courses derived strictly from approved uploaded materials.
+ * Supports optional department pushdown and short-TTL in-process caching.
  */
-export async function getApprovedCourses(): Promise<DbCourse[]> {
+export async function getApprovedCourses(department?: string): Promise<DbCourse[]> {
+  const normalizedDept =
+    department && department !== "ALL" && department !== "All"
+      ? department.trim()
+      : undefined;
   const courseMap = new Map<string, DbCourse>();
 
   if (isDevMemoryMode()) {
-    const approved = devStore.submissions.filter((s) => s.status === "APPROVED");
+    const approved = devStore.submissions.filter(
+      (s) =>
+        s.status === "APPROVED" &&
+        (!normalizedDept || s.department.toLowerCase() === normalizedDept.toLowerCase())
+    );
     for (const s of approved) {
       const normalized = s.courseCode.trim().toUpperCase();
       const existing = courseMap.get(normalized);
@@ -570,13 +648,23 @@ export async function getApprovedCourses(): Promise<DbCourse[]> {
     return Array.from(courseMap.values()).sort((a, b) => a.code.localeCompare(b.code));
   }
 
+  const cacheKey = normalizedDept ? `dept:${normalizedDept.toLowerCase()}` : "all";
+  const cacheMap = getInProcessCoursesCache();
+  const cached = cacheMap.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data as DbCourse[];
+  }
+
   const db = await getReadyDb();
+  const deptFilterSql = normalizedDept ? "AND LOWER(department) = LOWER($1)" : "";
+  const queryParams = normalizedDept ? [normalizedDept] : [];
+
   const res = await db.query(
     `WITH counts AS (
        SELECT UPPER(TRIM(course_code)) AS norm_code,
               COUNT(*)::int AS resource_count
        FROM submissions
-       WHERE status = 'APPROVED'
+       WHERE status = 'APPROVED' ${deptFilterSql}
        GROUP BY UPPER(TRIM(course_code))
      ),
      latest AS (
@@ -588,7 +676,7 @@ export async function getApprovedCourses(): Promise<DbCourse[]> {
               level,
               semester
        FROM submissions
-       WHERE status = 'APPROVED'
+       WHERE status = 'APPROVED' ${deptFilterSql}
        ORDER BY UPPER(TRIM(course_code)), created_at DESC
      )
      SELECT latest.course_code AS "courseCode",
@@ -599,7 +687,8 @@ export async function getApprovedCourses(): Promise<DbCourse[]> {
             counts.resource_count AS "resourceCount"
      FROM latest
      JOIN counts ON counts.norm_code = latest.norm_code
-     ORDER BY latest.norm_code ASC`
+     ORDER BY latest.norm_code ASC`,
+    queryParams
   );
 
   for (const row of res.rows) {
@@ -621,13 +710,16 @@ export async function getApprovedCourses(): Promise<DbCourse[]> {
     }
   }
 
-  return Array.from(courseMap.values()).sort((a, b) => a.code.localeCompare(b.code));
+  const sorted = Array.from(courseMap.values()).sort((a, b) => a.code.localeCompare(b.code));
+  cacheMap.set(cacheKey, { data: sorted, expiresAt: Date.now() + COURSES_CACHE_TTL_MS });
+  return sorted;
 }
 
 export async function getApprovedResourcesPaginated(
   options: GetResourcesOptions = {}
 ): Promise<PaginatedResourcesResult> {
-  const page = Math.max(1, options.page || 1);
+  // Bound page depth to prevent deep OFFSET full-scan abuse
+  const page = Math.min(500, Math.max(1, options.page || 1));
   const limit = Math.min(100, Math.max(1, options.limit || 24));
   const offset = (page - 1) * limit;
 
@@ -745,20 +837,23 @@ export async function getApprovedResourcesPaginated(
   else if (options.sortBy === "title") orderClause = "title ASC";
   else if (options.sortBy === "course") orderClause = "course_code ASC, created_at DESC";
 
-  const countRes = await db.query(
-    `SELECT COUNT(*)::int AS total FROM submissions WHERE ${whereClause}`,
-    params
-  );
-  const total = Number(countRes.rows[0]?.total ?? 0);
-
   const listParams = [...params, limit, offset];
-  const rowsRes = await db.query(
-    `SELECT * FROM submissions
-     WHERE ${whereClause}
-     ORDER BY ${orderClause}
-     LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
-    listParams
-  );
+  const [countRes, rowsRes] = await Promise.all([
+    db.query(
+      `SELECT COUNT(*)::int AS total FROM submissions WHERE ${whereClause}`,
+      params
+    ),
+    db.query(
+      `SELECT ${PUBLIC_LIST_COLUMNS}
+       FROM submissions
+       WHERE ${whereClause}
+       ORDER BY ${orderClause}
+       LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+      listParams
+    ),
+  ]);
+
+  const total = Number(countRes.rows[0]?.total ?? 0);
 
   return {
     resources: rowsRes.rows.map(mapSubmissionRow),

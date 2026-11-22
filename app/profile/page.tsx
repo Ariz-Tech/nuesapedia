@@ -70,7 +70,7 @@ const LEVELS = ["100L", "200L", "300L", "400L", "500L"];
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { user: authUser, loading: authLoading, refresh: refreshAuth, logout: authLogout } = useAuth();
+  const { user: authUser, loading: authLoading, setUser: setAuthUser, logout: authLogout } = useAuth();
   const { savedCount, offlineCount, shelfCount, offlineTotalBytes } = useSavedResources();
 
   const user: UserProfile | null = authUser
@@ -163,8 +163,8 @@ export default function ProfilePage() {
       });
 
       const data = await res.json();
-      if (res.ok && data.success) {
-        await refreshAuth();
+      if (res.ok && data.success && data.user) {
+        setAuthUser(data.user);
       }
     } catch (err) {
       console.error("Failed to update avatar:", err);
@@ -200,7 +200,9 @@ export default function ProfilePage() {
       setEditedName(null);
       setEditedDept(null);
       setEditedLevel(null);
-      await refreshAuth();
+      if (data.user) {
+        setAuthUser(data.user);
+      }
       setProfileMsg({ type: "ok", text: "Academic profile updated." });
     } catch (err: unknown) {
       setProfileMsg({

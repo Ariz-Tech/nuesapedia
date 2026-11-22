@@ -19,13 +19,14 @@ import {
   SAVED_MATERIALS_EVENT,
 } from "@/lib/saved-client";
 import {
-  type OfflineDocumentRecord,
-  getAllOfflineDocuments,
+  type OfflineDocumentMeta,
+  getAllOfflineDocumentMeta,
   getAllReadingProgress,
   downloadAndCacheMaterial,
   removeOfflineDocument,
   clearAllOfflineDocuments,
   OFFLINE_VAULT_EVENT,
+  READING_PROGRESS_EVENT,
 } from "@/lib/offline-vault";
 import { useAuth } from "@/context/AuthContext";
 
@@ -40,7 +41,7 @@ interface SavedResourcesContextValue {
   toggleSave: (item: CourseMaterialItem) => Promise<boolean>;
   removeSaved: (id: string) => Promise<void>;
   refreshSaved: (catalogLookup?: CourseMaterialItem[]) => Promise<void>;
-  offlineDocs: OfflineDocumentRecord[];
+  offlineDocs: OfflineDocumentMeta[];
   offlineIds: Set<string>;
   offlineCount: number;
   offlineTotalBytes: number;
@@ -84,7 +85,7 @@ export function SavedResourcesProvider({ children }: { children: ReactNode }) {
 
   const [savedItems, setSavedItems] = useState<CourseMaterialItem[]>([]);
   const [loadingSaved, setLoadingSaved] = useState<boolean>(true);
-  const [offlineDocs, setOfflineDocs] = useState<OfflineDocumentRecord[]>([]);
+  const [offlineDocs, setOfflineDocs] = useState<OfflineDocumentMeta[]>([]);
   const [recentReadingIds, setRecentReadingIds] = useState<string[]>([]);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
 
@@ -95,11 +96,12 @@ export function SavedResourcesProvider({ children }: { children: ReactNode }) {
   );
 
   const refreshOfflineVault = useCallback(async () => {
-    const [docs, reading] = await Promise.all([
-      getAllOfflineDocuments(),
-      getAllReadingProgress(),
-    ]);
+    const docs = await getAllOfflineDocumentMeta();
     setOfflineDocs(docs);
+  }, []);
+
+  const refreshReadingProgress = useCallback(async () => {
+    const reading = await getAllReadingProgress();
     setRecentReadingIds(reading.map((r) => r.id));
   }, []);
 
@@ -117,24 +119,38 @@ export function SavedResourcesProvider({ children }: { children: ReactNode }) {
     [activeUserId]
   );
 
+  // Hydrate lightweight IndexedDB metadata once on mount (independent of auth state)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [docs, reading] = await Promise.all([
+        getAllOfflineDocumentMeta(),
+        getAllReadingProgress(),
+      ]);
+      if (!cancelled) {
+        setOfflineDocs(docs);
+        setRecentReadingIds(reading.map((r) => r.id));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (authLoading) return;
     let cancelled = false;
 
     (async () => {
-      const [savedResult, docs, reading] = await Promise.all([
-        fetchSavedMaterials(undefined, activeUserId).catch(() => ({
+      const savedResult = await fetchSavedMaterials(undefined, activeUserId).catch(
+        () => ({
           items: readLocalSaved(activeUserId),
           isAuthenticated: Boolean(activeUserId),
-        })),
-        getAllOfflineDocuments(),
-        getAllReadingProgress(),
-      ]);
+        })
+      );
 
       if (!cancelled) {
         setSavedItems(savedResult.items);
-        setOfflineDocs(docs);
-        setRecentReadingIds(reading.map((r) => r.id));
         setLoadingSaved(false);
       }
     })();
@@ -153,14 +169,19 @@ export function SavedResourcesProvider({ children }: { children: ReactNode }) {
     const handleVaultChanged = () => {
       void refreshOfflineVault();
     };
+    const handleProgressChanged = () => {
+      void refreshReadingProgress();
+    };
 
     window.addEventListener(SAVED_MATERIALS_EVENT, handleSavedChanged);
     window.addEventListener(OFFLINE_VAULT_EVENT, handleVaultChanged);
+    window.addEventListener(READING_PROGRESS_EVENT, handleProgressChanged);
     return () => {
       window.removeEventListener(SAVED_MATERIALS_EVENT, handleSavedChanged);
       window.removeEventListener(OFFLINE_VAULT_EVENT, handleVaultChanged);
+      window.removeEventListener(READING_PROGRESS_EVENT, handleProgressChanged);
     };
-  }, [activeUserId, refreshOfflineVault]);
+  }, [activeUserId, refreshOfflineVault, refreshReadingProgress]);
 
   const savedIds = useMemo(() => {
     const set = new Set<string>();
@@ -221,9 +242,9 @@ export function SavedResourcesProvider({ children }: { children: ReactNode }) {
       });
 
       try {
-        const res = await downloadAndCacheMaterial(item, options);
-        await refreshOfflineVault();
-        return res;
+        // `saveOfflineDocument` dispatches OFFLINE_VAULT_EVENT automatically on new writes,
+        // avoiding redundant double IndexedDB reads.
+        return await downloadAndCacheMaterial(item, options);
       } finally {
         setDownloadingIds((prev) => {
           const next = new Set(prev);
@@ -232,21 +253,16 @@ export function SavedResourcesProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [refreshOfflineVault]
+    []
   );
 
-  const removeOffline = useCallback(
-    async (id: string) => {
-      await removeOfflineDocument(id);
-      await refreshOfflineVault();
-    },
-    [refreshOfflineVault]
-  );
+  const removeOffline = useCallback(async (id: string) => {
+    await removeOfflineDocument(id);
+  }, []);
 
   const clearOfflineVault = useCallback(async () => {
     await clearAllOfflineDocuments();
-    await refreshOfflineVault();
-  }, [refreshOfflineVault]);
+  }, []);
 
   const shelfCount = useMemo(() => {
     const ids = new Set<string>();

@@ -3,12 +3,40 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Menu, X, User as UserIcon, ShieldCheck, Search } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useSavedResources } from "@/context/SavedResourcesContext";
 import { type CourseMetadata } from "@/lib/courses";
 import BrandMark from "@/components/ui/BrandMark";
+
+// Module-level courses cache prevents firing GET /api/courses on every route navigation
+const NAVBAR_COURSES_TTL_MS = 5 * 60 * 1000;
+let cachedNavbarCourses: CourseMetadata[] | null = null;
+let cachedNavbarCoursesExpiry = 0;
+let inFlightNavbarCourses: Promise<CourseMetadata[]> | null = null;
+
+function loadNavbarCoursesOnce(): Promise<CourseMetadata[]> {
+  if (cachedNavbarCourses && cachedNavbarCoursesExpiry > Date.now()) {
+    return Promise.resolve(cachedNavbarCourses);
+  }
+  if (inFlightNavbarCourses) {
+    return inFlightNavbarCourses;
+  }
+  inFlightNavbarCourses = fetch("/api/courses")
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      const list = Array.isArray(data?.courses) ? (data.courses as CourseMetadata[]) : [];
+      cachedNavbarCourses = list;
+      cachedNavbarCoursesExpiry = Date.now() + NAVBAR_COURSES_TTL_MS;
+      return list;
+    })
+    .catch(() => cachedNavbarCourses ?? [])
+    .finally(() => {
+      inFlightNavbarCourses = null;
+    });
+  return inFlightNavbarCourses;
+}
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -19,8 +47,20 @@ export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [navQuery, setNavQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
-  const [dynamicCourses, setDynamicCourses] = useState<CourseMetadata[]>([]);
+  const [dynamicCourses, setDynamicCourses] = useState<CourseMetadata[]>(
+    () => cachedNavbarCourses ?? []
+  );
   const desktopSearchRef = useRef<HTMLDivElement>(null);
+
+  const ensureCoursesLoaded = useCallback(() => {
+    if (cachedNavbarCourses && cachedNavbarCoursesExpiry > Date.now()) {
+      setDynamicCourses(cachedNavbarCourses);
+      return;
+    }
+    void loadNavbarCoursesOnce().then((courses) => {
+      setDynamicCourses(courses);
+    });
+  }, []);
 
   const isResourcesActive = pathname === "/resources" || pathname?.startsWith("/resources/");
   const isSavedActive = pathname === "/saved";
@@ -44,22 +84,6 @@ export default function Navbar() {
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, []);
-
-  // Fetch only courses from uploaded materials
-  useEffect(() => {
-    let active = true;
-    fetch("/api/courses")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (active && Array.isArray(data?.courses)) {
-          setDynamicCourses(data.courses);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
     };
   }, []);
 
@@ -149,11 +173,19 @@ export default function Navbar() {
                 <Search className="w-4 h-4 text-slate-500 absolute left-3.5 pointer-events-none" />
                 <input
                   type="text"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={Boolean(searchFocused && navQuery.trim())}
+                  aria-controls="navbar-course-suggestions"
                   value={navQuery}
-                  onFocus={() => setSearchFocused(true)}
+                  onFocus={() => {
+                    setSearchFocused(true);
+                    ensureCoursesLoaded();
+                  }}
                   onChange={(e) => {
                     setNavQuery(e.target.value);
                     setSearchFocused(true);
+                    ensureCoursesLoaded();
                   }}
                   placeholder="Search course code or title..."
                   aria-label="Search by course code or course title"
@@ -173,7 +205,11 @@ export default function Navbar() {
 
               {/* Live Course Suggestions Dropdown */}
               {searchFocused && navQuery.trim() && (
-                <div className="absolute left-0 right-0 mt-2 bg-surface rounded-2xl border border-slate-200 shadow-lg overflow-hidden z-50 animate-ui-fade">
+                <div
+                  id="navbar-course-suggestions"
+                  role="listbox"
+                  className="absolute left-0 right-0 mt-2 bg-surface rounded-2xl border border-slate-200 shadow-lg overflow-hidden z-50 animate-ui-fade"
+                >
                   {matchingCourses.length > 0 && (
                     <div className="py-1.5">
                       <div className="px-3.5 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
@@ -316,7 +352,11 @@ export default function Navbar() {
             <input
               type="text"
               value={navQuery}
-              onChange={(e) => setNavQuery(e.target.value)}
+              onFocus={ensureCoursesLoaded}
+              onChange={(e) => {
+                setNavQuery(e.target.value);
+                ensureCoursesLoaded();
+              }}
               placeholder="Search course code or title..."
               aria-label="Search by course code or course title"
               className="w-full pl-9 pr-20 py-2.5 rounded-xl border border-slate-200 bg-surface-subtle focus:bg-surface text-sm text-slate-800 placeholder:text-slate-500 focus:outline-none focus:border-brand-emerald focus:ring-2 focus:ring-brand-emerald/15"

@@ -1,11 +1,12 @@
-import { getSession } from "@/lib/auth";
+import { getSession, getSessionWithUser } from "@/lib/auth";
 import {
   getAllSubmissions,
+  getModerationStatusCounts,
   getSubmissionById,
   updateSubmissionStatus,
-  findUserById,
 } from "@/lib/db";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
+import { revalidateCatalog } from "@/lib/cache";
 
 export async function GET(req: Request) {
   try {
@@ -20,11 +21,14 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status") || "ALL";
-    const limit = Math.min(300, Math.max(1, parseInt(searchParams.get("limit") || "150", 10) || 150));
+    const limit = Math.min(300, Math.max(1, parseInt(searchParams.get("limit") || "50", 10) || 50));
     const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10) || 0);
 
-    const submissions = await getAllSubmissions(status, { limit, offset });
-    return apiSuccess({ submissions });
+    const [submissions, counts] = await Promise.all([
+      getAllSubmissions(status, { limit, offset }),
+      getModerationStatusCounts(),
+    ]);
+    return apiSuccess({ submissions, counts, pagination: { limit, offset } });
   } catch (error) {
     console.error("GET /api/moderation error:", error);
     return apiError("INTERNAL_ERROR", "Internal server error.", 500);
@@ -33,14 +37,18 @@ export async function GET(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    const session = await getSession();
-    if (!session || (session.role !== "MODERATOR" && session.role !== "ADMIN")) {
+    const resolved = await getSessionWithUser();
+    if (
+      !resolved ||
+      (resolved.session.role !== "MODERATOR" && resolved.session.role !== "ADMIN")
+    ) {
       return apiError(
         "FORBIDDEN",
         "Moderator or Admin privileges required.",
         403
       );
     }
+    const { session, user: reviewer } = resolved;
 
     const body = await req.json();
     const { submissionId, status, rejectionReason } = body ?? {};
@@ -69,7 +77,6 @@ export async function PATCH(req: Request) {
       return apiError("NOT_FOUND", "Submission not found.", 404);
     }
 
-    const reviewer = await findUserById(session.userId);
     const reviewerLabel = reviewer
       ? `${reviewer.name} (${session.role})`
       : session.email;
@@ -85,6 +92,8 @@ export async function PATCH(req: Request) {
     if (!updated) {
       return apiError("NOT_FOUND", "Submission not found.", 404);
     }
+
+    revalidateCatalog(String(submissionId));
 
     // Retain storage object pointer on rejection for audit, contributor review, or appeal.
     // Permanent purge is mediated by explicit contributor withdrawal or lifecycle rules.

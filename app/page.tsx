@@ -9,7 +9,8 @@ import CtaBanner from "@/components/CtaBanner";
 import Footer from "@/components/Footer";
 import { getApprovedResourcesPaginated } from "@/lib/db";
 
-export const dynamic = "force-dynamic";
+// ISR: cache the public landing page for 60s (also invalidated on-demand via revalidateCatalog)
+export const revalidate = 60;
 
 export default async function Home() {
   let initialRecent: RecentResourceItem[] | undefined = undefined;

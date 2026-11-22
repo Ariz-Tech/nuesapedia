@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import Image from "next/image";
 import {
   Bookmark,
@@ -35,7 +36,7 @@ interface ResourceCardProps {
   removeTitle?: string;
 }
 
-export default function ResourceCard({
+function ResourceCardComponent({
   item,
   isBookmarked,
   isCachedOffline,
@@ -281,6 +282,9 @@ export default function ResourceCard({
     </article>
   );
 }
+
+const ResourceCard = memo(ResourceCardComponent);
+export default ResourceCard;
 
 export function ResourceCardSkeleton() {
   return (

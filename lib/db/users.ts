@@ -67,6 +67,59 @@ export async function findUserById(id: string): Promise<DbUser | null> {
   return res.rows[0] ? mapUserRow(res.rows[0]) : null;
 }
 
+/**
+ * Projection-light lookup for session validation & profile hydration.
+ * Omits the scrypt `password` hash column from PostgreSQL wire transfer.
+ */
+export async function findUserProfileById(
+  id: string
+): Promise<Omit<DbUser, "password"> | null> {
+  if (isDevMemoryMode()) {
+    for (const user of devStore.users.values()) {
+      if (user.id === id) {
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          department: user.department,
+          level: user.level,
+          avatar: user.avatar,
+          role: user.role,
+          sessionVersion: user.sessionVersion,
+          createdAt: user.createdAt,
+        };
+      }
+    }
+    return null;
+  }
+
+  const db = await getReadyDb();
+  const res = await db.query(
+    `SELECT id, name, email, department, level, avatar, role, session_version, created_at
+     FROM users
+     WHERE id = $1
+     LIMIT 1`,
+    [id]
+  );
+
+  if (!res.rows[0]) return null;
+  const row = res.rows[0];
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    email: String(row.email),
+    department: String(row.department),
+    level: String(row.level),
+    avatar: String(row.avatar),
+    role: String(row.role || "STUDENT"),
+    sessionVersion: Number(row.session_version ?? row.sessionVersion ?? 1),
+    createdAt:
+      row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : String(row.created_at ?? row.createdAt ?? new Date().toISOString()),
+  };
+}
+
 export async function createUser(data: {
   name: string;
   email: string;

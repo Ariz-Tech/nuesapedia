@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import {
   getResourceById,
@@ -42,15 +42,35 @@ export async function GET(
       return apiError("NOT_FOUND", "Resource not found.", 404);
     }
 
-    const session = await getSession();
-    if (!canAccessSubmission(resource, session)) {
-      return apiError("NOT_FOUND", "Resource not found.", 404);
+    // Short-circuit: APPROVED resources are public — skip unnecessary `users` DB lookup
+    if (resource.status !== "APPROVED") {
+      const session = await getSession();
+      if (!canAccessSubmission(resource, session)) {
+        return apiError("NOT_FOUND", "Resource not found.", 404);
+      }
     }
 
+    // Offload download counter write via Next.js `after()` so exam-week traffic spikes
+    // on a single past question never block redirects on PostgreSQL hot-row locks.
     const downloads =
       resource.status === "APPROVED"
-        ? await incrementResourceDownload(id)
+        ? (resource.downloads || 0) + 1
         : resource.downloads || 0;
+
+    if (resource.status === "APPROVED") {
+      try {
+        after(async () => {
+          try {
+            await incrementResourceDownload(id);
+          } catch (err) {
+            console.error("[download] Deferred download count increment failed:", err);
+          }
+        });
+      } catch {
+        // Fallback outside Next.js request lifecycle (e.g., direct unit tests)
+        await incrementResourceDownload(id).catch(() => {});
+      }
+    }
 
     if (resource.medium === "YOUTUBE") {
       const targetUrl =

@@ -21,9 +21,12 @@ export async function GET(
       return apiError("NOT_FOUND", "Resource not found.", 404);
     }
 
-    const session = await getSession();
-    if (!canAccessSubmission(resource, session)) {
-      return apiError("NOT_FOUND", "Resource not found.", 404);
+    // Short-circuit: APPROVED resources are public — skip unnecessary `users` DB lookup
+    if (resource.status !== "APPROVED") {
+      const session = await getSession();
+      if (!canAccessSubmission(resource, session)) {
+        return apiError("NOT_FOUND", "Resource not found.", 404);
+      }
     }
 
     const { searchParams } = new URL(req.url);

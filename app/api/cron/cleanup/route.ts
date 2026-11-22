@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { pruneStaleUploads, getReadyDb, isDevMemoryMode } from "@/lib/db";
-import { deleteR2Object } from "@/lib/r2";
+import { deleteR2ObjectsBatch } from "@/lib/r2";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 
 function safeCompare(a: string, b: string): boolean {
@@ -37,16 +37,14 @@ export async function GET(req: Request) {
       }
     }
 
-    // 1. Prune abandoned uploads older than 2 hours
+    // 1. Prune abandoned uploads older than 2 hours and batch-delete orphaned R2 objects
     const prunedKeys = await pruneStaleUploads(120);
-    let deletedR2Count = 0;
-    for (const key of prunedKeys) {
-      try {
-        await deleteR2Object(key);
-        deletedR2Count++;
-      } catch (err) {
-        console.error(`Failed to delete orphaned R2 object (${key}):`, err);
-      }
+    const { deletedCount: deletedR2Count, failedKeys } =
+      await deleteR2ObjectsBatch(prunedKeys);
+    if (failedKeys.length > 0) {
+      console.error(
+        `[cron/cleanup] Failed to batch-delete ${failedKeys.length} orphaned R2 object(s).`
+      );
     }
 
     // 2. Clean expired rate limits from PostgreSQL

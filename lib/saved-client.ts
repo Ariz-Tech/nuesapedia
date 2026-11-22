@@ -126,7 +126,12 @@ export function writeLocalSaved(
 ): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(getStorageKey(userId), JSON.stringify(items));
+    // Strip verbose descriptions before persisting to synchronous localStorage
+    const compact = items.map((item) => ({
+      ...item,
+      description: item.description ? item.description.slice(0, 180) : undefined,
+    }));
+    window.localStorage.setItem(getStorageKey(userId), JSON.stringify(compact));
     window.dispatchEvent(new CustomEvent(SAVED_MATERIALS_EVENT));
   } catch {
     // Ignore storage quota errors on localStorage

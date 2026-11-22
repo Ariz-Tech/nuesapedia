@@ -2,9 +2,11 @@ import crypto from "node:crypto";
 import { getSession } from "@/lib/auth";
 import {
   getUserSubmissions,
+  countUserUploadingSubmissions,
   createSubmission,
   deleteSubmissionWithChecks,
 } from "@/lib/db";
+import { revalidateCatalog } from "@/lib/cache";
 import {
   generateSignedUploadUrl,
   deleteR2Object,
@@ -203,11 +205,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Prevent storage key and submission reservation flooding by bounding concurrent in-flight sessions
-    const existingUserSubmissions = await getUserSubmissions(session.userId);
-    const activeUploadingCount = existingUserSubmissions.filter(
-      (s) => s.status === "UPLOADING"
-    ).length;
+    // Prevent storage key and submission reservation flooding via indexed COUNT(*) on status='UPLOADING'
+    const activeUploadingCount = await countUserUploadingSubmissions(session.userId);
     if (activeUploadingCount >= 5) {
       return apiError(
         "CONCURRENT_UPLOADS_EXCEEDED",
@@ -302,7 +301,6 @@ export async function POST(req: Request) {
           uploadId: submission.id,
           uploadUrl: signedUploadUrl,
           r2Key,
-          submission,
         },
       },
       201
@@ -353,6 +351,7 @@ export async function DELETE(req: Request) {
       await deleteR2Object(result.r2Key);
     }
 
+    revalidateCatalog(id);
     return apiSuccess({ message: "Submission withdrawn." });
   } catch (error) {
     console.error("DELETE /api/uploads error:", error);

@@ -136,6 +136,26 @@ export function isTransientConnectionError(err: unknown): boolean {
   );
 }
 
+function isIdempotentReadQuery(args: unknown[]): boolean {
+  const first = args[0];
+  const text =
+    typeof first === "string"
+      ? first
+      : first && typeof first === "object" && "text" in first && typeof (first as { text?: unknown }).text === "string"
+        ? (first as { text: string }).text
+        : "";
+  const trimmed = text.trimStart().toUpperCase();
+  if (trimmed.startsWith("SELECT")) return true;
+  // Allow read-only CTEs (WITH ... SELECT) without data-modifying statements
+  if (
+    trimmed.startsWith("WITH") &&
+    !/\b(INSERT|UPDATE|DELETE)\b/.test(trimmed)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function wrapPoolErrors(instance: Pool): Pool {
   const rawQuery = instance.query.bind(instance) as (...args: unknown[]) => unknown;
   const rawConnect = instance.connect.bind(instance) as (...args: unknown[]) => unknown;
@@ -153,9 +173,10 @@ function wrapPoolErrors(instance: Pool): Pool {
     try {
       return await (rawQuery(...args) as Promise<unknown>);
     } catch (err) {
-      if (isTransientConnectionError(err)) {
+      // Only auto-retry idempotent read queries so transient resets never duplicate writes
+      if (isTransientConnectionError(err) && isIdempotentReadQuery(args)) {
         console.warn(
-          "[db] Transient PostgreSQL connection error caught, retrying query once with fresh connection:",
+          "[db] Transient PostgreSQL connection error caught, retrying read query once with fresh connection:",
           normalizeDbError(err).message
         );
         await new Promise((r) => setTimeout(r, 150));
@@ -222,9 +243,11 @@ export function getPool(): Pool {
 
     const nextPool = new Pool({
       connectionString,
-      max: Number(process.env.PG_POOL_MAX) || 5,
+      max: Number(process.env.PG_POOL_MAX) || 10,
       idleTimeoutMillis: 15000,
-      connectionTimeoutMillis: 15000,
+      connectionTimeoutMillis: 10000,
+      statement_timeout: Number(process.env.PG_STATEMENT_TIMEOUT_MS) || 8000,
+      query_timeout: Number(process.env.PG_QUERY_TIMEOUT_MS) || 10000,
       keepAlive: true,
       keepAliveInitialDelayMillis: 10000,
       ssl: isLocal ? false : { rejectUnauthorized },

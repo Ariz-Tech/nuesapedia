@@ -1,9 +1,8 @@
-import { getSession } from "@/lib/auth";
+import { getSession, getSessionWithUser } from "@/lib/auth";
 import {
   createMaterialRequest,
   getMaterialRequests,
   updateMaterialRequestStatus,
-  findUserById,
 } from "@/lib/db";
 import { isKnownDepartment } from "@/lib/departments";
 import { isAcademicLevel } from "@/lib/constants";
@@ -46,8 +45,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const session = await getSession();
-    const user = session ? await findUserById(session.userId) : null;
+    const resolved = await getSessionWithUser();
+    const user = resolved?.user ?? null;
 
     const body = await req.json();
     const {

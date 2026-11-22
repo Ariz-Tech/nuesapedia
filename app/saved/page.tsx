@@ -1,12 +1,17 @@
 "use client";
 
-import { Suspense, useEffect, useState, useMemo } from "react";
+import { Suspense, useEffect, useState, useMemo, useCallback, useDeferredValue } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import ResourceViewerModal from "@/components/ResourceViewerModal";
 import ResourceCard, { ResourceCardSkeleton } from "@/components/ResourceCard";
+
+const ResourceViewerModal = dynamic(
+  () => import("@/components/ResourceViewerModal"),
+  { ssr: false }
+);
 import { DEPARTMENTS } from "@/lib/departments";
 import { resolveCourseMetadata } from "@/lib/courses";
 import {
@@ -56,16 +61,27 @@ function SavedVaultContent() {
 
   const [hydrating, setHydrating] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [selectedDept, setSelectedDept] = useState("All");
+  const tabParam = searchParams.get("tab");
   const [selectedType, setSelectedType] = useState<ShelfFilter>(() =>
-    searchParams.get("tab") === "offline" ? "Offline" : "All"
+    tabParam === "offline" ? "Offline" : "All"
   );
+  const [visibleLimit, setVisibleLimit] = useState(24);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
   const [activeMaterial, setActiveMaterial] = useState<CourseMaterialItem | null>(null);
   const [confirmClearVault, setConfirmClearVault] = useState(false);
   const [clearingVault, setClearingVault] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Sync tab query param without unmounting the page tree
+  const [prevTabParam, setPrevTabParam] = useState(tabParam);
+  if (tabParam !== prevTabParam) {
+    setPrevTabParam(tabParam);
+    setSelectedType(tabParam === "offline" ? "Offline" : "All");
+    setVisibleLimit(24);
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -102,72 +118,87 @@ function SavedVaultContent() {
     return Array.from(map.values());
   }, [savedItems, offlineDocs]);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setFeedbackMsg(msg);
     window.setTimeout(() => setFeedbackMsg(null), 3500);
-  };
+  }, []);
 
-  const handleToggleBookmark = async (item: CourseMaterialItem) => {
-    const targetId = item.resourceId || item.id;
-    try {
-      setBusyId(targetId);
-      const nowSaved = await toggleSave(item);
-      showToast(
-        nowSaved
-          ? `Bookmarked "${item.title}"`
-          : `Removed "${item.title}" from Bookmarks`
-      );
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleRemoveFromShelf = async (item: CourseMaterialItem) => {
-    const targetId = item.resourceId || item.id;
-    const bookmarked = isSaved(targetId);
-    const cached = isOfflineAvailable(targetId);
-
-    try {
-      setBusyId(targetId);
-      if (selectedType === "Offline" && cached) {
-        await removeOffline(targetId);
-        showToast(`Removed offline copy of "${item.title}"`);
-      } else {
-        if (bookmarked) await removeSaved(targetId);
-        if (cached && !bookmarked) await removeOffline(targetId);
-        showToast(`Removed "${item.title}" from Saved`);
+  const handleToggleBookmark = useCallback(
+    async (item: CourseMaterialItem) => {
+      const targetId = item.resourceId || item.id;
+      try {
+        setBusyId(targetId);
+        const nowSaved = await toggleSave(item);
+        showToast(
+          nowSaved
+            ? `Bookmarked "${item.title}"`
+            : `Removed "${item.title}" from Bookmarks`
+        );
+      } finally {
+        setBusyId(null);
       }
-      if (activeMaterial && (activeMaterial.resourceId || activeMaterial.id) === targetId) {
-        setActiveMaterial(null);
-      }
-    } finally {
-      setBusyId(null);
-    }
-  };
+    },
+    [toggleSave, showToast]
+  );
 
-  const handleDownload = async (item: CourseMaterialItem) => {
-    const res = await downloadMaterial(item, { saveToDevice: true });
-    if (res.ok) {
-      showToast(
-        res.fromCache
-          ? `Saved PDF copy of "${item.title}" from Offline Vault`
-          : `Downloaded "${item.title}" & saved for offline reading`
-      );
-    } else if (res.error) {
-      showToast(res.error);
-    }
-  };
+  const handleRemoveFromShelf = useCallback(
+    async (item: CourseMaterialItem) => {
+      const targetId = item.resourceId || item.id;
+      const bookmarked = isSaved(targetId);
+      const cached = isOfflineAvailable(targetId);
+
+      try {
+        setBusyId(targetId);
+        if (selectedType === "Offline" && cached) {
+          await removeOffline(targetId);
+          showToast(`Removed offline copy of "${item.title}"`);
+        } else {
+          if (bookmarked) await removeSaved(targetId);
+          if (cached && !bookmarked) await removeOffline(targetId);
+          showToast(`Removed "${item.title}" from Saved`);
+        }
+        setActiveMaterial((prev) =>
+          prev && (prev.resourceId || prev.id) === targetId ? null : prev
+        );
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [isSaved, isOfflineAvailable, selectedType, removeOffline, removeSaved, showToast]
+  );
+
+  const handleDownload = useCallback(
+    async (item: CourseMaterialItem) => {
+      const res = await downloadMaterial(item, { saveToDevice: true });
+      if (res.ok) {
+        showToast(
+          res.fromCache
+            ? `Saved PDF copy of "${item.title}" from Offline Vault`
+            : `Downloaded "${item.title}" & saved for offline reading`
+        );
+      } else if (res.error) {
+        showToast(res.error);
+      }
+    },
+    [downloadMaterial, showToast]
+  );
+
+  const handleShare = useCallback(async (mat: CourseMaterialItem) => {
+    const targetId = mat.resourceId || mat.id;
+    await shareOrCopyMaterialLink(mat);
+    setCopiedId(targetId);
+    window.setTimeout(() => setCopiedId(null), 2200);
+  }, []);
 
   const filteredItems = useMemo(() => {
+    const q = deferredSearchQuery.toLowerCase().trim();
     return combinedItems.filter((item) => {
       const targetId = item.resourceId || item.id;
-      const q = searchQuery.toLowerCase().trim();
-      const courseTitle = resolveCourseMetadata(item.courseCode).title.toLowerCase();
       const matchesQuery =
         !q ||
         item.title.toLowerCase().includes(q) ||
         item.courseCode.toLowerCase().includes(q) ||
-        courseTitle.includes(q) ||
+        resolveCourseMetadata(item.courseCode).title.toLowerCase().includes(q) ||
         item.department.toLowerCase().includes(q);
 
       const matchesDept =
@@ -183,7 +214,12 @@ function SavedVaultContent() {
 
       return matchesQuery && matchesDept && matchesType;
     });
-  }, [combinedItems, searchQuery, selectedDept, selectedType, isOfflineAvailable]);
+  }, [combinedItems, deferredSearchQuery, selectedDept, selectedType, isOfflineAvailable]);
+
+  const visibleItems = useMemo(
+    () => filteredItems.slice(0, visibleLimit),
+    [filteredItems, visibleLimit]
+  );
 
   const loading = hydrating && loadingSaved && combinedItems.length === 0;
 
@@ -302,7 +338,11 @@ function SavedVaultContent() {
 
         {/* Toast Feedback */}
         {feedbackMsg && (
-          <div className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs sm:text-sm font-semibold flex items-center justify-between">
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs sm:text-sm font-semibold flex items-center justify-between"
+          >
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-[#00875A]" />
               <span>{feedbackMsg}</span>
@@ -464,67 +504,68 @@ function SavedVaultContent() {
             )}
 
             {/* Saved Cards Grid */}
-            {filteredItems.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredItems.map((item) => {
-                  const targetId = item.resourceId || item.id;
-                  return (
-                    <ResourceCard
-                      key={targetId}
-                      item={item}
-                      isBookmarked={isSaved(targetId)}
-                      isCachedOffline={isOfflineAvailable(targetId)}
-                      isDownloading={downloadingIds.has(targetId)}
-                      isTogglingBookmark={busyId === targetId}
-                      isCopied={copiedId === targetId}
-                      isOfflineMode={isOffline}
-                      onOpen={setActiveMaterial}
-                      onToggleBookmark={handleToggleBookmark}
-                      onDownload={handleDownload}
-                      onShare={async (mat) => {
-                        await shareOrCopyMaterialLink(mat);
-                        setCopiedId(targetId);
-                        window.setTimeout(() => setCopiedId(null), 2200);
-                      }}
-                      onRemove={handleRemoveFromShelf}
-                      isRemoving={busyId === targetId}
-                      removeTitle={
-                        selectedType === "Offline"
-                          ? "Delete offline copy"
-                          : "Remove from Saved"
-                      }
-                    />
-                  );
-                })}
+            {visibleItems.length > 0 && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {visibleItems.map((item) => {
+                    const targetId = item.resourceId || item.id;
+                    return (
+                      <ResourceCard
+                        key={targetId}
+                        item={item}
+                        isBookmarked={isSaved(targetId)}
+                        isCachedOffline={isOfflineAvailable(targetId)}
+                        isDownloading={downloadingIds.has(targetId)}
+                        isTogglingBookmark={busyId === targetId}
+                        isCopied={copiedId === targetId}
+                        isOfflineMode={isOffline}
+                        onOpen={setActiveMaterial}
+                        onToggleBookmark={handleToggleBookmark}
+                        onDownload={handleDownload}
+                        onShare={handleShare}
+                        onRemove={handleRemoveFromShelf}
+                        isRemoving={busyId === targetId}
+                        removeTitle={
+                          selectedType === "Offline"
+                            ? "Delete offline copy"
+                            : "Remove from Saved"
+                        }
+                      />
+                    );
+                  })}
+                </div>
+
+                {filteredItems.length > visibleItems.length && (
+                  <div className="flex justify-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setVisibleLimit((prev) => prev + 24)}
+                      className="px-5 py-2.5 rounded-xl border border-slate-200 bg-surface hover:bg-slate-50 text-xs font-bold text-brand-forest shadow-2xs transition-colors cursor-pointer"
+                    >
+                      Show More ({filteredItems.length - visibleItems.length} remaining)
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </>
         )}
       </main>
 
-      {/* In-Page Reader & Video Player Modal */}
-      <ResourceViewerModal
-        material={activeMaterial}
-        isBookmarked={
-          activeMaterial ? isSaved(activeMaterial.resourceId || activeMaterial.id) : false
-        }
-        isTogglingBookmark={
-          activeMaterial
-            ? busyId === (activeMaterial.resourceId || activeMaterial.id)
-            : false
-        }
-        onToggleBookmark={handleToggleBookmark}
-        onClose={() => setActiveMaterial(null)}
-      />
+      {/* In-Page Reader & Video Player Modal (lazy-loaded only when opened) */}
+      {activeMaterial && (
+        <ResourceViewerModal
+          material={activeMaterial}
+          isBookmarked={isSaved(activeMaterial.resourceId || activeMaterial.id)}
+          isTogglingBookmark={busyId === (activeMaterial.resourceId || activeMaterial.id)}
+          onToggleBookmark={handleToggleBookmark}
+          onClose={() => setActiveMaterial(null)}
+        />
+      )}
 
       <Footer />
     </div>
   );
-}
-
-function SavedVaultKeyedWrapper() {
-  const searchParams = useSearchParams();
-  return <SavedVaultContent key={searchParams.get("tab") || "all"} />;
 }
 
 export default function SavedVaultPage() {
@@ -533,7 +574,11 @@ export default function SavedVaultPage() {
       fallback={
         <div className="min-h-screen bg-[#FAFAFA] flex flex-col justify-between">
           <Navbar />
-          <div className="flex-1 flex flex-col items-center justify-center p-12">
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex-1 flex flex-col items-center justify-center p-12"
+          >
             <Loader2 className="w-8 h-8 text-[#00875A] animate-spin mb-3" />
             <p className="text-xs text-slate-500 font-medium">
               Loading saved &amp; offline materials...
@@ -543,7 +588,7 @@ export default function SavedVaultPage() {
         </div>
       }
     >
-      <SavedVaultKeyedWrapper />
+      <SavedVaultContent />
     </Suspense>
   );
 }

@@ -14,6 +14,11 @@ import {
 } from "@/lib/constants";
 import { deleteR2Object } from "@/lib/r2";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
+import {
+  PRIVATE_NO_STORE_HEADERS,
+  PUBLIC_CATALOG_CACHE_HEADERS,
+  revalidateCatalog,
+} from "@/lib/cache";
 
 /**
  * GET /api/resources/:id
@@ -44,9 +49,15 @@ export async function GET(
         session.role === "ADMIN" ||
         session.role === "MODERATOR");
 
-    return apiSuccess({
-      resource: canSeeInternal ? resource : toPublicResource(resource),
-    });
+    return apiSuccess(
+      {
+        resource: canSeeInternal ? resource : toPublicResource(resource),
+      },
+      200,
+      canSeeInternal || resource.status !== "APPROVED"
+        ? PRIVATE_NO_STORE_HEADERS
+        : PUBLIC_CATALOG_CACHE_HEADERS
+    );
   } catch (error) {
     console.error("GET /api/resources/[id] error:", error);
     return apiError("INTERNAL_ERROR", "Failed to load resource details.", 500);
@@ -128,6 +139,7 @@ export async function PATCH(
         description !== undefined ? String(description).slice(0, 1000) : undefined,
     });
 
+    revalidateCatalog(id);
     return apiSuccess({ resource: updated });
   } catch (error) {
     console.error("PATCH /api/resources/[id] error:", error);
@@ -173,6 +185,7 @@ export async function DELETE(
       await deleteR2Object(result.r2Key);
     }
 
+    revalidateCatalog(id);
     return apiSuccess({ message: "Resource deleted successfully." });
   } catch (error) {
     console.error("DELETE /api/resources/[id] error:", error);

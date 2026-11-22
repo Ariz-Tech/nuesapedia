@@ -18,6 +18,9 @@ interface RateLimitEntry {
 }
 
 const memoryRateLimitStore = new Map<string, RateLimitEntry>();
+const MAX_MEMORY_ENTRIES = 10_000;
+const MEMORY_SWEEP_INTERVAL_MS = 30_000;
+let lastMemorySweepAt = 0;
 
 const IPV4_REGEX =
   /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
@@ -30,9 +33,21 @@ function isValidIp(ip: string): boolean {
 
 function checkMemoryRateLimit(key: string, config: RateLimitConfig): RateLimitResult {
   const now = Date.now();
-  if (memoryRateLimitStore.size > 2000) {
+  // Throttle expired-key sweeps so high-cardinality bursts never trigger O(N) scans per request
+  if (
+    memoryRateLimitStore.size > 2000 &&
+    now - lastMemorySweepAt >= MEMORY_SWEEP_INTERVAL_MS
+  ) {
+    lastMemorySweepAt = now;
     for (const [k, v] of memoryRateLimitStore.entries()) {
       if (v.resetAt <= now) memoryRateLimitStore.delete(k);
+    }
+  }
+  // Hard cap to prevent unbounded heap growth under spoofed/distributed bursts
+  if (memoryRateLimitStore.size >= MAX_MEMORY_ENTRIES && !memoryRateLimitStore.has(key)) {
+    const oldestKey = memoryRateLimitStore.keys().next().value;
+    if (oldestKey !== undefined) {
+      memoryRateLimitStore.delete(oldestKey);
     }
   }
 
@@ -67,8 +82,63 @@ function checkMemoryRateLimit(key: string, config: RateLimitConfig): RateLimitRe
 }
 
 /**
- * Distributed PostgreSQL-backed sliding/fixed window rate limiter safe across
- * serverless isolates, with local memory mode for zero-DB dev/test environments.
+ * Optional zero-dependency Upstash Redis REST sliding/fixed window rate limiter.
+ * Offloads high-throughput rate-limit writes away from the primary PostgreSQL pool
+ * whenever `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are configured.
+ */
+async function checkUpstashRateLimit(
+  key: string,
+  config: RateLimitConfig
+): Promise<RateLimitResult | null> {
+  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  if (!url || !token) return null;
+
+  const redisKey = `rl:${key}`;
+  const windowSec = Math.max(1, Math.ceil(config.windowMs / 1000));
+  const res = await fetch(`${url.replace(/\/$/, "")}/pipeline`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify([
+      ["INCR", redisKey],
+      ["PTTL", redisKey],
+    ]),
+    signal: AbortSignal.timeout(2500),
+  });
+
+  if (!res.ok) return null;
+  const results = (await res.json()) as Array<{ result?: number }>;
+  const count = Number(results?.[0]?.result ?? 1);
+  let pttl = Number(results?.[1]?.result ?? -1);
+
+  if (count === 1 || pttl < 0) {
+    pttl = windowSec * 1000;
+    await fetch(`${url.replace(/\/$/, "")}/expire/${encodeURIComponent(redisKey)}/${windowSec}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(2000),
+    }).catch(() => {});
+  }
+
+  const now = Date.now();
+  const resetAt = now + Math.max(1000, pttl);
+  const retryAfterSeconds = Math.max(1, Math.ceil((resetAt - now) / 1000));
+
+  return {
+    allowed: count <= config.limit,
+    remaining: Math.max(0, config.limit - count),
+    resetAt,
+    retryAfterSeconds,
+  };
+}
+
+/**
+ * Distributed rate limiter: prefers Upstash Redis REST when configured (zero Postgres
+ * write amplification), falls back to PostgreSQL across serverless isolates, and uses
+ * local memory mode in zero-DB dev/test environments.
  */
 export async function checkRateLimit(
   key: string,
@@ -76,6 +146,18 @@ export async function checkRateLimit(
 ): Promise<RateLimitResult> {
   if (isDevMemoryMode()) {
     return checkMemoryRateLimit(key, config);
+  }
+
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    try {
+      const redisResult = await checkUpstashRateLimit(key, config);
+      if (redisResult) return redisResult;
+    } catch (err) {
+      console.warn(
+        "[rate-limit] Upstash Redis unavailable; falling back to PostgreSQL limiter:",
+        err instanceof Error ? err.message : err
+      );
+    }
   }
 
   try {

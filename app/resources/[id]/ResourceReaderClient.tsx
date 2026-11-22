@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { resolveCourseMetadata } from "@/lib/courses";
+import { useTrackedBlobUrl } from "@/lib/hooks/useTrackedBlobUrl";
 import {
   type CourseMaterialItem,
   normalizeMaterial,
@@ -59,6 +61,7 @@ export default function ResourceReaderClient({
     isOffline,
   } = useSavedResources();
 
+  const { createTrackedUrl, revokeTrackedUrl } = useTrackedBlobUrl();
   const [resource, setResource] = useState<CourseMaterialItem | null>(initialResource);
   const [offlineBlobUrl, setOfflineBlobUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(!initialResource);
@@ -66,6 +69,7 @@ export default function ResourceReaderClient({
   const [savingBookmark, setSavingBookmark] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [readingPct, setReadingPct] = useState(0);
+  const [videoActivated, setVideoActivated] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -88,7 +92,7 @@ export default function ResourceReaderClient({
         if (offlineDoc) {
           found = normalizeMaterial(offlineDoc.material);
           if (offlineDoc.blob && offlineDoc.blob.size > 0) {
-            createdBlobUrl = URL.createObjectURL(offlineDoc.blob);
+            createdBlobUrl = createTrackedUrl(offlineDoc.blob);
             if (mounted) setOfflineBlobUrl(createdBlobUrl);
           }
         }
@@ -144,10 +148,10 @@ export default function ResourceReaderClient({
       mounted = false;
       if (studyTimer) window.clearTimeout(studyTimer);
       if (createdBlobUrl) {
-        URL.revokeObjectURL(createdBlobUrl);
+        revokeTrackedUrl(createdBlobUrl);
       }
     };
-  }, [resourceId, initialResource]);
+  }, [resourceId, initialResource, createTrackedUrl, revokeTrackedUrl]);
 
   const handleToggleBookmark = async () => {
     if (!resource) return;
@@ -307,10 +311,10 @@ export default function ResourceReaderClient({
                     const rec = await getOfflineDocument(canonicalId);
                     if (rec?.blob) {
                       const previousUrl = offlineBlobUrl;
-                      const nextUrl = URL.createObjectURL(rec.blob);
+                      const nextUrl = createTrackedUrl(rec.blob);
                       setOfflineBlobUrl(nextUrl);
                       if (previousUrl && previousUrl !== nextUrl) {
-                        URL.revokeObjectURL(previousUrl);
+                        revokeTrackedUrl(previousUrl);
                       }
                     }
                   }
@@ -427,13 +431,42 @@ export default function ResourceReaderClient({
                       </p>
                     </div>
                   ) : videoId ? (
-                    <iframe
-                      src={`https://www.youtube.com/embed/${videoId}?autoplay=0&rel=0`}
-                      title={resource.title}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                      className="w-full h-full border-0"
-                    />
+                    videoActivated ? (
+                      <iframe
+                        src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
+                        title={resource.title}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        className="w-full h-full border-0"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setVideoActivated(true)}
+                        aria-label={`Play video: ${resource.title}`}
+                        className="relative w-full h-full group cursor-pointer block"
+                      >
+                        <Image
+                          src={
+                            resource.thumbnailUrl ||
+                            `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
+                          }
+                          alt={resource.title}
+                          fill
+                          sizes="(max-width: 1024px) 100vw, 1024px"
+                          priority
+                          className="object-cover opacity-85 group-hover:opacity-95 transition-opacity"
+                        />
+                        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/20 transition-colors flex flex-col items-center justify-center gap-3">
+                          <span className="w-16 h-16 rounded-full bg-red-600 text-white flex items-center justify-center shadow-xl group-hover:scale-105 transition-transform">
+                            <Play className="w-7 h-7 fill-white ml-1" />
+                          </span>
+                          <span className="px-3 py-1 rounded-full bg-black/65 text-white text-xs font-semibold">
+                            Click to load YouTube lecture
+                          </span>
+                        </div>
+                      </button>
+                    )
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center text-white p-6">
                       <Play className="w-12 h-12 text-red-500 mb-2" />

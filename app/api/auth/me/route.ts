@@ -1,5 +1,5 @@
-import { getSession } from "@/lib/auth";
-import { findUserById, updateUser } from "@/lib/db";
+import { getSession, getSessionWithUser } from "@/lib/auth";
+import { updateUser } from "@/lib/db";
 import { isKnownDepartment } from "@/lib/departments";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 import { ACADEMIC_LEVELS } from "@/lib/constants";
@@ -8,15 +8,12 @@ const VALID_LEVELS = ACADEMIC_LEVELS as readonly string[];
 
 export async function GET() {
   try {
-    const session = await getSession();
-    if (!session) {
+    const resolved = await getSessionWithUser();
+    if (!resolved) {
       return apiError("UNAUTHORIZED", "Not authenticated.", 401);
     }
 
-    const user = await findUserById(session.userId);
-    if (!user) {
-      return apiError("NOT_FOUND", "User not found.", 404);
-    }
+    const { session, user } = resolved;
 
     return apiSuccess({
       user: {

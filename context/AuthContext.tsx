@@ -29,6 +29,7 @@ export interface AuthUser {
 interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
+  setUser: (user: AuthUser | null) => void;
   refresh: () => Promise<AuthUser | null>;
   logout: () => Promise<void>;
 }
@@ -36,6 +37,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
+  setUser: () => {},
   refresh: async () => null,
   logout: async () => {},
 });
@@ -107,9 +109,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [fetchMe]);
 
+  const updateUserState = useCallback((nextUser: AuthUser | null) => {
+    setUser(nextUser);
+    setLoading(false);
+  }, []);
+
   const contextValue = useMemo(
-    () => ({ user, loading, refresh, logout }),
-    [user, loading, refresh, logout]
+    () => ({ user, loading, setUser: updateUserState, refresh, logout }),
+    [user, loading, updateUserState, refresh, logout]
   );
 
   return (

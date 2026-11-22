@@ -67,9 +67,17 @@ export default function ModerationPortalPage() {
   // Active top portal tab: "queue" | "requests" | "reports" | "users"
   const [activePortalTab, setActivePortalTab] = useState<"queue" | "requests" | "reports" | "users">("queue");
 
-  // Review Queue state
+  // Review Queue state (server-filtered & paginated so pending items never disappear past 150 rows)
+  const QUEUE_PAGE_SIZE = 50;
   const [submissions, setSubmissions] = useState<SubmissionItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
+  const [queueOffset, setQueueOffset] = useState(0);
+  const [statusCounts, setStatusCounts] = useState({
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+    total: 0,
+  });
   const [statusFilter, setStatusFilter] = useState<"ALL" | "PENDING_REVIEW" | "APPROVED" | "REJECTED">("PENDING_REVIEW");
   const [departmentFilter, setDepartmentFilter] = useState("ALL");
   const [mediumFilter, setMediumFilter] = useState<"ALL" | "PDF" | "YOUTUBE">("ALL");
@@ -87,53 +95,74 @@ export default function ModerationPortalPage() {
   const [userSearchQuery, setUserSearchQuery] = useState("");
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
-  // Student Material Requests & Issue Reports state
+  // Student Material Requests & Issue Reports state (loaded lazily on tab visit)
   const [materialRequests, setMaterialRequests] = useState<MaterialRequestItem[]>([]);
+  const [requestsLoaded, setRequestsLoaded] = useState(false);
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [resourceReports, setResourceReports] = useState<ResourceReportItem[]>([]);
+  const [reportsLoaded, setReportsLoaded] = useState(false);
   const [reportsLoading, setReportsLoading] = useState(false);
 
-  const fetchSubmissions = useCallback(async () => {
-    setQueueLoading(true);
-    try {
-      const res = await fetch(`/api/moderation?status=ALL`, { cache: "no-store" });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setSubmissions(data.submissions || []);
+  const fetchSubmissions = useCallback(
+    async (
+      targetStatus: "ALL" | "PENDING_REVIEW" | "APPROVED" | "REJECTED" = statusFilter,
+      targetOffset: number = queueOffset,
+      signal?: AbortSignal
+    ) => {
+      setQueueLoading(true);
+      try {
+        const res = await fetch(
+          `/api/moderation?status=${encodeURIComponent(targetStatus)}&limit=${QUEUE_PAGE_SIZE}&offset=${targetOffset}`,
+          { cache: "no-store", signal }
+        );
+        const data = await res.json();
+        if (res.ok && data.success) {
+          setSubmissions(data.submissions || []);
+          if (data.counts) {
+            setStatusCounts(data.counts);
+          }
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("Failed to fetch moderation queue:", err);
+      } finally {
+        setQueueLoading(false);
       }
-    } catch (err) {
-      console.error("Failed to fetch moderation queue:", err);
-    } finally {
-      setQueueLoading(false);
-    }
-  }, []);
+    },
+    [statusFilter, queueOffset]
+  );
 
-  const fetchRequests = useCallback(async () => {
+  const fetchRequests = useCallback(async (signal?: AbortSignal) => {
     setRequestsLoading(true);
     try {
-      const res = await fetch("/api/requests?status=ALL", { cache: "no-store" });
+      const res = await fetch("/api/requests?status=ALL", { cache: "no-store", signal });
       const data = await res.json();
       if (res.ok && data.success) {
         setMaterialRequests(data.requests || data.data || []);
+        setRequestsLoaded(true);
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("Failed to fetch material requests:", err);
     } finally {
       setRequestsLoading(false);
     }
   }, []);
 
-  const fetchReports = useCallback(async () => {
+  const fetchReports = useCallback(async (signal?: AbortSignal) => {
     setReportsLoading(true);
     try {
       const res = await fetch("/api/moderation/reports?status=ALL", {
         cache: "no-store",
+        signal,
       });
       const data = await res.json();
       if (res.ok && data.success) {
         setResourceReports(data.reports || data.data || []);
+        setReportsLoaded(true);
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("Failed to fetch resource reports:", err);
     } finally {
       setReportsLoading(false);
@@ -175,6 +204,7 @@ export default function ModerationPortalPage() {
     }
   };
 
+  // Load only the active queue slice on mount / filter / pagination change
   useEffect(() => {
     if (!currentUser || (currentUser.role !== "MODERATOR" && currentUser.role !== "ADMIN")) {
       return;
@@ -182,49 +212,107 @@ export default function ModerationPortalPage() {
 
     let active = true;
     const controller = new AbortController();
-    async function loadPortalData() {
+    async function loadQueueSlice() {
       try {
-        const [modRes, reqRes, repRes] = await Promise.all([
-          fetch("/api/moderation?status=ALL", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/requests?status=ALL", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/moderation/reports?status=ALL", { cache: "no-store", signal: controller.signal }),
-        ]);
-
-        const [modData, reqData, repData] = await Promise.all([
-          modRes.ok ? modRes.json().catch(() => null) : null,
-          reqRes.ok ? reqRes.json().catch(() => null) : null,
-          repRes.ok ? repRes.json().catch(() => null) : null,
-        ]);
-
-        if (!active) return;
-
-        if (modData?.success) {
-          setSubmissions(modData.submissions || []);
-        }
-        if (reqData?.success) {
-          setMaterialRequests(reqData.requests || reqData.data || []);
-        }
-        if (repData?.success) {
-          setResourceReports(repData.reports || repData.data || []);
+        const res = await fetch(
+          `/api/moderation?status=${encodeURIComponent(statusFilter)}&limit=${QUEUE_PAGE_SIZE}&offset=${queueOffset}`,
+          { cache: "no-store", signal: controller.signal }
+        );
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        if (active && data?.success) {
+          setSubmissions(data.submissions || []);
+          if (data.counts) {
+            setStatusCounts(data.counts);
+          }
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        console.error("Failed to load moderation portal data:", err);
+        console.error("Failed to fetch moderation queue:", err);
       } finally {
-        if (active) {
-          setQueueLoading(false);
-          setRequestsLoading(false);
-          setReportsLoading(false);
-        }
+        if (active) setQueueLoading(false);
       }
     }
 
-    void loadPortalData();
+    void loadQueueSlice();
     return () => {
       active = false;
       controller.abort();
     };
-  }, [currentUser]);
+  }, [currentUser, statusFilter, queueOffset]);
+
+  // Lazy-load Requests tab only when opened
+  useEffect(() => {
+    if (
+      activePortalTab !== "requests" ||
+      requestsLoaded ||
+      !currentUser ||
+      (currentUser.role !== "MODERATOR" && currentUser.role !== "ADMIN")
+    ) {
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    async function loadRequests() {
+      try {
+        const res = await fetch("/api/requests?status=ALL", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        if (active && data?.success) {
+          setMaterialRequests(data.requests || data.data || []);
+          setRequestsLoaded(true);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("Failed to fetch material requests:", err);
+      } finally {
+        if (active) setRequestsLoading(false);
+      }
+    }
+    void loadRequests();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [activePortalTab, requestsLoaded, currentUser]);
+
+  // Lazy-load Reports tab only when opened
+  useEffect(() => {
+    if (
+      activePortalTab !== "reports" ||
+      reportsLoaded ||
+      !currentUser ||
+      (currentUser.role !== "MODERATOR" && currentUser.role !== "ADMIN")
+    ) {
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    async function loadReports() {
+      try {
+        const res = await fetch("/api/moderation/reports?status=ALL", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        if (active && data?.success) {
+          setResourceReports(data.reports || data.data || []);
+          setReportsLoaded(true);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("Failed to fetch resource reports:", err);
+      } finally {
+        if (active) setReportsLoading(false);
+      }
+    }
+    void loadReports();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [activePortalTab, reportsLoaded, currentUser]);
 
   useEffect(() => {
     if (activePortalTab !== "users" || currentUser?.role !== "ADMIN") {
@@ -290,8 +378,16 @@ export default function ModerationPortalPage() {
       }
 
       setSubmissions((prev) =>
-        prev.map((item) => (item.id === submissionId ? data.submission : item))
+        statusFilter === "ALL" || statusFilter === "APPROVED"
+          ? prev.map((item) => (item.id === submissionId ? data.submission : item))
+          : prev.filter((item) => item.id !== submissionId)
       );
+      setStatusCounts((prev) => ({
+        ...prev,
+        pending: Math.max(0, prev.pending - (statusFilter === "PENDING_REVIEW" ? 1 : 0)),
+        rejected: Math.max(0, prev.rejected - (statusFilter === "REJECTED" ? 1 : 0)),
+        approved: prev.approved + 1,
+      }));
       setActionFeedback({
         type: "success",
         text: `Resource approved and published to faculty library!`,
@@ -334,8 +430,16 @@ export default function ModerationPortalPage() {
       }
 
       setSubmissions((prev) =>
-        prev.map((item) => (item.id === rejectingItem.id ? data.submission : item))
+        statusFilter === "ALL" || statusFilter === "REJECTED"
+          ? prev.map((item) => (item.id === rejectingItem.id ? data.submission : item))
+          : prev.filter((item) => item.id !== rejectingItem.id)
       );
+      setStatusCounts((prev) => ({
+        ...prev,
+        pending: Math.max(0, prev.pending - (rejectingItem.status === "PENDING_REVIEW" ? 1 : 0)),
+        approved: Math.max(0, prev.approved - (rejectingItem.status === "APPROVED" ? 1 : 0)),
+        rejected: prev.rejected + 1,
+      }));
       setRejectingItem(null);
       setRejectionReasonText("");
       setActionFeedback({
@@ -418,10 +522,29 @@ export default function ModerationPortalPage() {
     );
   }, [usersList, userSearchQuery]);
 
-  // Counts for tabs
-  const pendingCount = submissions.filter((s) => s.status === "PENDING_REVIEW").length;
-  const approvedCount = submissions.filter((s) => s.status === "APPROVED").length;
-  const rejectedCount = submissions.filter((s) => s.status === "REJECTED").length;
+  // Server-backed counts & memoized tab badges (zero redundant render-loop filters)
+  const pendingCount = statusCounts.pending;
+  const approvedCount = statusCounts.approved;
+  const rejectedCount = statusCounts.rejected;
+  const totalSubmissionsCount = statusCounts.total;
+
+  const openRequestsCount = useMemo(
+    () => materialRequests.reduce((n, r) => n + (r.status === "OPEN" ? 1 : 0), 0),
+    [materialRequests]
+  );
+  const openReportsCount = useMemo(
+    () => resourceReports.reduce((n, r) => n + (r.status === "OPEN" ? 1 : 0), 0),
+    [resourceReports]
+  );
+
+  const activeStatusTotal =
+    statusFilter === "PENDING_REVIEW"
+      ? pendingCount
+      : statusFilter === "APPROVED"
+        ? approvedCount
+        : statusFilter === "REJECTED"
+          ? rejectedCount
+          : totalSubmissionsCount;
 
   if (loadingAuth) {
     return (
@@ -563,7 +686,7 @@ export default function ModerationPortalPage() {
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={fetchSubmissions}
+                onClick={() => void fetchSubmissions(statusFilter, queueOffset)}
                 disabled={queueLoading}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50 text-xs font-semibold transition-colors cursor-pointer"
                 title="Refresh queue"
@@ -632,7 +755,7 @@ export default function ModerationPortalPage() {
                     : "bg-slate-200 text-slate-700"
                 }`}
               >
-                {submissions.length}
+                {totalSubmissionsCount}
               </span>
             </button>
 
@@ -647,15 +770,17 @@ export default function ModerationPortalPage() {
             >
               <MessageSquare className="w-4 h-4" />
               <span>Student Requests</span>
-              <span
-                className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
-                  activePortalTab === "requests"
-                    ? "bg-brand-emerald text-white"
-                    : "bg-slate-200 text-slate-700"
-                }`}
-              >
-                {materialRequests.filter((r) => r.status === "OPEN").length}
-              </span>
+              {requestsLoaded && (
+                <span
+                  className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
+                    activePortalTab === "requests"
+                      ? "bg-brand-emerald text-white"
+                      : "bg-slate-200 text-slate-700"
+                  }`}
+                >
+                  {openRequestsCount}
+                </span>
+              )}
             </button>
 
             <button
@@ -669,15 +794,17 @@ export default function ModerationPortalPage() {
             >
               <Flag className="w-4 h-4" />
               <span>Issue Reports</span>
-              <span
-                className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
-                  activePortalTab === "reports"
-                    ? "bg-brand-emerald text-white"
-                    : "bg-slate-200 text-slate-700"
-                }`}
-              >
-                {resourceReports.filter((r) => r.status === "OPEN").length}
-              </span>
+              {reportsLoaded && (
+                <span
+                  className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
+                    activePortalTab === "reports"
+                      ? "bg-brand-emerald text-white"
+                      : "bg-slate-200 text-slate-700"
+                  }`}
+                >
+                  {openReportsCount}
+                </span>
+              )}
             </button>
 
             {isAdmin && (
@@ -710,7 +837,10 @@ export default function ModerationPortalPage() {
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0 no-scrollbar">
                   <button
                     type="button"
-                    onClick={() => setStatusFilter("PENDING_REVIEW")}
+                    onClick={() => {
+                      setStatusFilter("PENDING_REVIEW");
+                      setQueueOffset(0);
+                    }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
                       statusFilter === "PENDING_REVIEW"
                         ? "bg-amber-100 text-amber-900 border border-amber-300 font-extrabold shadow-2xs"
@@ -725,7 +855,10 @@ export default function ModerationPortalPage() {
 
                   <button
                     type="button"
-                    onClick={() => setStatusFilter("APPROVED")}
+                    onClick={() => {
+                      setStatusFilter("APPROVED");
+                      setQueueOffset(0);
+                    }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
                       statusFilter === "APPROVED"
                         ? "bg-emerald-100 text-emerald-900 border border-emerald-300 font-extrabold shadow-2xs"
@@ -740,7 +873,10 @@ export default function ModerationPortalPage() {
 
                   <button
                     type="button"
-                    onClick={() => setStatusFilter("REJECTED")}
+                    onClick={() => {
+                      setStatusFilter("REJECTED");
+                      setQueueOffset(0);
+                    }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
                       statusFilter === "REJECTED"
                         ? "bg-rose-100 text-rose-900 border border-rose-300 font-extrabold shadow-2xs"
@@ -755,14 +891,17 @@ export default function ModerationPortalPage() {
 
                   <button
                     type="button"
-                    onClick={() => setStatusFilter("ALL")}
+                    onClick={() => {
+                      setStatusFilter("ALL");
+                      setQueueOffset(0);
+                    }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer shrink-0 ${
                       statusFilter === "ALL"
                         ? "bg-slate-800 text-white shadow-2xs"
                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                     }`}
                   >
-                    All ({submissions.length})
+                    All ({totalSubmissionsCount})
                   </button>
                 </div>
 
@@ -993,6 +1132,33 @@ export default function ModerationPortalPage() {
                 ))}
               </div>
             )}
+
+            {activeStatusTotal > QUEUE_PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-4 pt-4 border-t border-slate-200 text-xs text-slate-600">
+                <span>
+                  Showing {queueOffset + 1}–{Math.min(queueOffset + submissions.length, activeStatusTotal)} of{" "}
+                  <strong className="text-slate-900">{activeStatusTotal}</strong>
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={queueOffset === 0 || queueLoading}
+                    onClick={() => setQueueOffset((prev) => Math.max(0, prev - QUEUE_PAGE_SIZE))}
+                    className="px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 font-semibold disabled:opacity-40 cursor-pointer"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    disabled={queueOffset + QUEUE_PAGE_SIZE >= activeStatusTotal || queueLoading}
+                    onClick={() => setQueueOffset((prev) => prev + QUEUE_PAGE_SIZE)}
+                    className="px-3.5 py-2 rounded-xl bg-brand-emerald hover:bg-brand-emerald-hover text-white font-semibold disabled:opacity-40 cursor-pointer"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1008,7 +1174,7 @@ export default function ModerationPortalPage() {
               </div>
               <button
                 type="button"
-                onClick={fetchRequests}
+                onClick={() => void fetchRequests()}
                 className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
               >
                 Refresh
@@ -1099,7 +1265,7 @@ export default function ModerationPortalPage() {
               </div>
               <button
                 type="button"
-                onClick={fetchReports}
+                onClick={() => void fetchReports()}
                 className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
               >
                 Refresh

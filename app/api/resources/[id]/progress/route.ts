@@ -3,6 +3,7 @@ import {
   upsertReadingProgress,
   getUserResourceReadingProgress,
 } from "@/lib/db";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 
 export async function GET(
@@ -41,6 +42,19 @@ export async function PUT(
     const session = await getSession();
     if (!session) {
       return apiError("UNAUTHORIZED", "Authentication required.", 401);
+    }
+
+    const rl = await checkRateLimit(`progress:${session.userId}`, {
+      limit: 30,
+      windowMs: 60 * 1000,
+    });
+    if (!rl.allowed) {
+      return apiError(
+        "RATE_LIMITED",
+        `Too many progress updates. Please wait ${rl.retryAfterSeconds}s.`,
+        429,
+        { "Retry-After": String(rl.retryAfterSeconds) }
+      );
     }
 
     const { id } = await context.params;

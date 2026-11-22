@@ -4,6 +4,9 @@ import { resolveCourseMetadata } from "@/lib/courses";
 import type { CourseMaterialItem } from "@/lib/saved-client";
 import ResourceReaderClient from "./ResourceReaderClient";
 
+// ISR: cache public approved resource reader pages for 60s (invalidated via revalidateCatalog)
+export const revalidate = 60;
+
 interface PageProps {
   params: Promise<{ id: string }>;
 }

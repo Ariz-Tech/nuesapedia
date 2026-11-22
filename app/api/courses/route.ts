@@ -1,5 +1,6 @@
 import { getApprovedCourses } from "@/lib/db";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
+import { PUBLIC_COURSES_CACHE_HEADERS } from "@/lib/cache";
 
 export async function GET(req: Request) {
   try {
@@ -9,13 +10,7 @@ export async function GET(req: Request) {
     const semester = searchParams.get("semester");
     const query = searchParams.get("q")?.trim().toLowerCase();
 
-    let courses = await getApprovedCourses();
-
-    if (department && department !== "ALL" && department !== "All") {
-      courses = courses.filter(
-        (c) => c.department.toLowerCase() === department.toLowerCase()
-      );
-    }
+    let courses = await getApprovedCourses(department || undefined);
 
     if (level && level !== "ALL" && level !== "All") {
       courses = courses.filter(
@@ -37,10 +32,14 @@ export async function GET(req: Request) {
       );
     }
 
-    return apiSuccess({
-      total: courses.length,
-      courses,
-    });
+    return apiSuccess(
+      {
+        total: courses.length,
+        courses,
+      },
+      200,
+      PUBLIC_COURSES_CACHE_HEADERS
+    );
   } catch (error) {
     console.error("GET /api/courses error:", error);
     return apiError("INTERNAL_ERROR", "Failed to load courses.", 500);

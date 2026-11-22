@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email));
+CREATE INDEX IF NOT EXISTS idx_users_created ON users (created_at DESC);
 
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id VARCHAR(60) PRIMARY KEY,
@@ -73,7 +74,18 @@ ALTER TABLE submissions ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS reviewed_by_id VARCHAR(50);
 
 CREATE INDEX IF NOT EXISTS idx_submissions_user ON submissions(user_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_user_active ON submissions(user_id, created_at DESC) WHERE status <> 'UPLOADING';
+CREATE INDEX IF NOT EXISTS idx_submissions_user_uploading ON submissions(user_id) WHERE status = 'UPLOADING';
 CREATE INDEX IF NOT EXISTS idx_submissions_status_created ON submissions(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_submissions_approved_created ON submissions(created_at DESC) WHERE status = 'APPROVED';
+CREATE INDEX IF NOT EXISTS idx_submissions_approved_downloads ON submissions(downloads DESC, created_at DESC) WHERE status = 'APPROVED';
+CREATE INDEX IF NOT EXISTS idx_submissions_approved_dept_level ON submissions(LOWER(department), level, created_at DESC) WHERE status = 'APPROVED';
+CREATE INDEX IF NOT EXISTS idx_submissions_approved_course_norm ON submissions(UPPER(TRIM(course_code)), created_at DESC) WHERE status = 'APPROVED';
+CREATE INDEX IF NOT EXISTS idx_submissions_approved_course_prefix ON submissions(LOWER(course_code) text_pattern_ops) WHERE status = 'APPROVED';
+CREATE INDEX IF NOT EXISTS idx_submissions_approved_title_prefix ON submissions(LOWER(title) text_pattern_ops) WHERE status = 'APPROVED';
+CREATE INDEX IF NOT EXISTS idx_submissions_approved_type_prefix ON submissions(LOWER(type) text_pattern_ops) WHERE status = 'APPROVED';
+CREATE INDEX IF NOT EXISTS idx_submissions_approved_medium ON submissions(medium) WHERE status = 'APPROVED';
+CREATE INDEX IF NOT EXISTS idx_submissions_approved_semester ON submissions(semester) WHERE status = 'APPROVED';
 CREATE INDEX IF NOT EXISTS idx_submissions_dept_lower ON submissions(LOWER(department));
 CREATE INDEX IF NOT EXISTS idx_submissions_course_lower ON submissions(LOWER(course_code));
 CREATE INDEX IF NOT EXISTS idx_submissions_level ON submissions(level);
@@ -95,6 +107,7 @@ CREATE TABLE IF NOT EXISTS saved_resources (
 );
 
 CREATE INDEX IF NOT EXISTS idx_saved_user ON saved_resources(user_id);
+CREATE INDEX IF NOT EXISTS idx_saved_user_created ON saved_resources(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_saved_resource ON saved_resources(resource_id);
 
 CREATE TABLE IF NOT EXISTS reading_progress (
