@@ -1,12 +1,16 @@
 import crypto from "node:crypto";
+import { after } from "next/server";
 import { getSession } from "@/lib/auth";
 import {
   getUserSubmissions,
   countUserUploadingSubmissions,
   createSubmission,
   deleteSubmissionWithChecks,
+  findDuplicateSubmissionByHash,
+  findDuplicateSubmissionByYoutubeId,
 } from "@/lib/db";
 import { revalidateCatalog } from "@/lib/cache";
+import { sendNewSubmissionAlertEmail } from "@/lib/email";
 import {
   generateSignedUploadUrl,
   deleteR2Object,
@@ -95,6 +99,7 @@ export async function POST(req: Request) {
       fileName,
       fileSize,
       fileSizeBytes: rawSizeBytes,
+      fileHash: rawFileHash,
       contentType,
       youtubeUrl,
     } = body ?? {};
@@ -173,6 +178,25 @@ export async function POST(req: Request) {
         );
       }
 
+      const duplicateVideo = await findDuplicateSubmissionByYoutubeId(videoId);
+      if (duplicateVideo) {
+        const statusLabel =
+          duplicateVideo.status === "APPROVED"
+            ? "is already published in the library"
+            : "is already pending moderator review";
+        return Response.json(
+          {
+            success: false,
+            error: {
+              code: "DUPLICATE_RESOURCE",
+              message: `This YouTube video ${statusLabel} as "${duplicateVideo.title}" (${duplicateVideo.courseCode}).`,
+            },
+            duplicate: duplicateVideo,
+          },
+          { status: 409 }
+        );
+      }
+
       const canonicalYoutubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
       const submission = await createSubmission({
         userId: session.userId,
@@ -193,6 +217,21 @@ export async function POST(req: Request) {
         status: "PENDING_REVIEW",
       });
 
+      const alertPayload = {
+        resourceTitle: submission.title,
+        courseCode: submission.courseCode,
+        department: submission.department,
+        medium: "YOUTUBE" as const,
+        uploaderEmail: session.email,
+      };
+      try {
+        after(async () => {
+          await sendNewSubmissionAlertEmail(alertPayload);
+        });
+      } catch {
+        void sendNewSubmissionAlertEmail(alertPayload);
+      }
+
       return apiSuccess({ submission }, 201);
     }
 
@@ -203,6 +242,39 @@ export async function POST(req: Request) {
         "Cloud object storage is not configured on this server.",
         503
       );
+    }
+
+    // SHA-256 content deduplication: prevent students from uploading identical documents twice
+    let normalizedFileHash: string | undefined;
+    if (typeof rawFileHash === "string" && rawFileHash.trim()) {
+      const candidate = rawFileHash.trim().toLowerCase();
+      if (!/^[a-f0-9]{64}$/.test(candidate)) {
+        return apiError(
+          "VALIDATION_ERROR",
+          "Invalid file integrity hash format (expected 64-character SHA-256 hex).",
+          400
+        );
+      }
+      normalizedFileHash = candidate;
+
+      const duplicateDoc = await findDuplicateSubmissionByHash(normalizedFileHash);
+      if (duplicateDoc) {
+        const statusLabel =
+          duplicateDoc.status === "APPROVED"
+            ? "is already published in the library"
+            : "is already pending moderator review";
+        return Response.json(
+          {
+            success: false,
+            error: {
+              code: "DUPLICATE_RESOURCE",
+              message: `This exact file ${statusLabel} as "${duplicateDoc.title}" (${duplicateDoc.courseCode}).`,
+            },
+            duplicate: duplicateDoc,
+          },
+          { status: 409 }
+        );
+      }
     }
 
     // Prevent storage key and submission reservation flooding via indexed COUNT(*) on status='UPLOADING'
@@ -287,6 +359,7 @@ export async function POST(req: Request) {
           ? String(fileSize).slice(0, 50)
           : formatInfo.label,
       fileSizeBytes: declaredBytes,
+      fileHash: normalizedFileHash,
       r2Key,
       status: "UPLOADING",
     });

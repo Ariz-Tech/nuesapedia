@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS submissions (
   file_name VARCHAR(255),
   file_size VARCHAR(50),
   file_size_bytes BIGINT,
+  file_hash VARCHAR(64),
   r2_key TEXT,
   cloudinary_public_id VARCHAR(255),
   youtube_url TEXT,
@@ -71,6 +72,7 @@ ALTER TABLE submissions ADD COLUMN IF NOT EXISTS r2_key TEXT;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS session_year VARCHAR(20) DEFAULT '2025/2026';
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS downloads INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64);
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS reviewed_by_id VARCHAR(50);
 
 CREATE INDEX IF NOT EXISTS idx_submissions_user ON submissions(user_id);
@@ -86,6 +88,8 @@ CREATE INDEX IF NOT EXISTS idx_submissions_approved_title_prefix ON submissions(
 CREATE INDEX IF NOT EXISTS idx_submissions_approved_type_prefix ON submissions(LOWER(type) text_pattern_ops) WHERE status = 'APPROVED';
 CREATE INDEX IF NOT EXISTS idx_submissions_approved_medium ON submissions(medium) WHERE status = 'APPROVED';
 CREATE INDEX IF NOT EXISTS idx_submissions_approved_semester ON submissions(semester) WHERE status = 'APPROVED';
+CREATE INDEX IF NOT EXISTS idx_submissions_active_file_hash ON submissions(file_hash) WHERE file_hash IS NOT NULL AND status IN ('PENDING_REVIEW', 'APPROVED');
+CREATE INDEX IF NOT EXISTS idx_submissions_active_youtube_id ON submissions(youtube_video_id) WHERE youtube_video_id IS NOT NULL AND status IN ('PENDING_REVIEW', 'APPROVED');
 CREATE INDEX IF NOT EXISTS idx_submissions_dept_lower ON submissions(LOWER(department));
 CREATE INDEX IF NOT EXISTS idx_submissions_course_lower ON submissions(LOWER(course_code));
 CREATE INDEX IF NOT EXISTS idx_submissions_level ON submissions(level);

@@ -1,13 +1,14 @@
-// NUESApedia Service Worker v7 — Offline App Shell + Bounded Catalog Cache (Zero Shared-PC Session Leaks)
-const SHELL_CACHE = "nuesapedia-shell-v7";
-const DATA_CACHE = "nuesapedia-public-data-v7";
+// The NUESA Library Service Worker v8 — Offline App Shell + Bounded Catalog Cache (Zero Shared-PC Session Leaks)
+const SHELL_CACHE = "nuesapedia-shell-v8";
+const DATA_CACHE = "nuesapedia-public-data-v8";
 const MAX_DATA_CACHE_ENTRIES = 40;
 
 // Strictly static / cookie-free shells (no server-rendered user PII).
-// Precaching /saved and /resources guarantees offline access to the IndexedDB Offline Vault.
+// Precaching /saved, /resources, and /pdf.worker.min.mjs guarantees offline reading in the IndexedDB Vault.
 const STATIC_ASSETS = [
   "/manifest.webmanifest",
   "/favicon.ico",
+  "/pdf.worker.min.mjs",
   "/saved",
   "/resources",
 ];
@@ -17,7 +18,7 @@ const OFFLINE_FALLBACK_HTML = `<!DOCTYPE html>
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Offline — NUESApedia</title>
+  <title>Offline — The NUESA Library</title>
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; background: #FAFAFA; color: #0C3B2E; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; box-sizing: border-box; text-align: center; }
     .card { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 24px; max-width: 460px; width: 100%; padding: 40px 24px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
@@ -175,9 +176,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static Next.js assets: Cache-first
+  // Static Next.js assets & PDF.js worker: Cache-first
   if (
     url.pathname.startsWith("/_next/static/") ||
+    url.pathname === "/pdf.worker.min.mjs" ||
     url.pathname.endsWith(".svg") ||
     url.pathname.endsWith(".png") ||
     url.pathname.endsWith(".woff2")

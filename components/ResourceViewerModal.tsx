@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import dynamic from "next/dynamic";
 import {
   X,
   Bookmark,
@@ -25,7 +26,7 @@ import {
 } from "@/lib/saved-client";
 import {
   getOfflineDocument,
-  getReadingProgress,
+  syncReadingProgress,
   saveReadingProgress,
 } from "@/lib/offline-vault";
 import { useSavedResources } from "@/context/SavedResourcesContext";
@@ -35,6 +36,16 @@ import { extractApiError } from "@/lib/api-helpers";
 import { getFileFormatDisplay } from "@/lib/file-utils";
 import { useTrackedBlobUrl } from "@/lib/hooks/useTrackedBlobUrl";
 import DocumentFallbackPreview from "@/components/DocumentFallbackPreview";
+
+const PdfCanvasViewer = dynamic(() => import("@/components/PdfCanvasViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex flex-col items-center justify-center p-8 text-slate-500">
+      <Loader2 className="w-7 h-7 text-[#00875A] animate-spin mb-2" />
+      <p className="text-xs font-medium">Loading PDF reader...</p>
+    </div>
+  ),
+});
 
 interface ResourceViewerModalProps {
   material: CourseMaterialItem | null;
@@ -76,6 +87,8 @@ function ResourceViewerModalOpen({
     material.medium !== "YOUTUBE"
   );
   const [readingPct, setReadingPct] = useState<number>(0);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const progressTimerRef = useRef<number | null>(null);
 
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [showReportBar, setShowReportBar] = useState<boolean>(false);
@@ -132,9 +145,10 @@ function ResourceViewerModalOpen({
     let studyTimer: number | undefined;
 
     (async () => {
-      const existingProgress = await getReadingProgress(canonicalId);
+      const existingProgress = await syncReadingProgress(canonicalId);
       if (active && existingProgress) {
         setReadingPct(existingProgress.percentage);
+        setCurrentPage(Math.max(1, existingProgress.page || 1));
       }
 
       if (isVideo) {
@@ -171,11 +185,29 @@ function ResourceViewerModalOpen({
     return () => {
       active = false;
       if (studyTimer) window.clearTimeout(studyTimer);
+      if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
       if (localUrl) {
         revokeTrackedUrl(localUrl);
       }
     };
   }, [canonicalId, isVideo, isOffline, createTrackedUrl, revokeTrackedUrl]);
+
+  const handlePageChange = useCallback(
+    (page: number, totalPages: number) => {
+      const pct =
+        totalPages > 0 ? Math.max(1, Math.min(100, Math.round((page / totalPages) * 100))) : 25;
+      setCurrentPage(page);
+      setReadingPct((prev) => (prev >= 100 && page < totalPages ? prev : Math.max(prev, pct)));
+
+      if (progressTimerRef.current) {
+        window.clearTimeout(progressTimerRef.current);
+      }
+      progressTimerRef.current = window.setTimeout(() => {
+        void saveReadingProgress(canonicalId, pct, page);
+      }, 900);
+    },
+    [canonicalId]
+  );
 
   const videoId =
     extractYoutubeId(material.youtubeVideoId) ||
@@ -206,7 +238,7 @@ function ResourceViewerModalOpen({
   const handleToggleCompleted = async () => {
     const nextPct = readingPct >= 100 ? 25 : 100;
     setReadingPct(nextPct);
-    await saveReadingProgress(canonicalId, nextPct, 1);
+    await saveReadingProgress(canonicalId, nextPct, currentPage);
   };
 
   const handleSubmitReport = async (e: React.FormEvent) => {
@@ -596,11 +628,12 @@ function ResourceViewerModalOpen({
                   compact
                 />
               ) : pdfSrc ? (
-                <iframe
-                  src={`${pdfSrc}#toolbar=1&view=FitH`}
+                <PdfCanvasViewer
+                  src={pdfSrc}
                   title={material.title}
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-downloads"
-                  className="w-full h-full border-0"
+                  initialPage={currentPage}
+                  onPageChange={handlePageChange}
+                  compact
                 />
               ) : isOffline ? (
                 <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center text-slate-500">

@@ -84,6 +84,11 @@ export function mapSubmissionRow(row: Record<string, unknown>): DbSubmission {
         ? String(row.fileSize)
         : undefined,
     fileSizeBytes,
+    fileHash: row.file_hash
+      ? String(row.file_hash)
+      : row.fileHash
+        ? String(row.fileHash)
+        : undefined,
     r2Key,
     cloudinaryPublicId: row.cloudinary_public_id
       ? String(row.cloudinary_public_id)
@@ -237,6 +242,7 @@ export async function createSubmission(data: {
   fileName?: string;
   fileSize?: string;
   fileSizeBytes?: number | null;
+  fileHash?: string;
   r2Key?: string;
   cloudinaryPublicId?: string;
   youtubeUrl?: string;
@@ -271,6 +277,7 @@ export async function createSubmission(data: {
     fileName: data.fileName,
     fileSize: data.fileSize,
     fileSizeBytes,
+    fileHash: data.fileHash,
     r2Key: data.r2Key,
     cloudinaryPublicId: data.cloudinaryPublicId,
     youtubeUrl: data.youtubeUrl,
@@ -290,12 +297,12 @@ export async function createSubmission(data: {
   const res = await db.query(
     `INSERT INTO submissions (
       id, user_id, title, course_code, department, level, semester, session_year, type, medium,
-      description, file_url, file_name, file_size, file_size_bytes, r2_key, cloudinary_public_id,
+      description, file_url, file_name, file_size, file_size_bytes, file_hash, r2_key, cloudinary_public_id,
       youtube_url, youtube_video_id, thumbnail_url, status, downloads
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-      $11, $12, $13, $14, $15, $16, $17,
-      $18, $19, $20, $21, 0
+      $11, $12, $13, $14, $15, $16, $17, $18,
+      $19, $20, $21, $22, 0
     )
     RETURNING *`,
     [
@@ -314,6 +321,7 @@ export async function createSubmission(data: {
       item.fileName ?? null,
       item.fileSize ?? null,
       item.fileSizeBytes ?? null,
+      item.fileHash ?? null,
       item.r2Key ?? null,
       item.cloudinaryPublicId ?? null,
       item.youtubeUrl ?? null,
@@ -462,6 +470,7 @@ export async function updateSubmission(
     fileName: string;
     fileSize: string;
     fileSizeBytes: number | null;
+    fileHash: string;
     r2Key: string;
     status: SubmissionStatus;
   }>
@@ -496,9 +505,10 @@ export async function updateSubmission(
          file_name = COALESCE($10, file_name),
          file_size = COALESCE($11, file_size),
          file_size_bytes = COALESCE($12, file_size_bytes),
-         r2_key = COALESCE($13, r2_key),
-         status = COALESCE($14, status)
-     WHERE id = $15
+         file_hash = COALESCE($13, file_hash),
+         r2_key = COALESCE($14, r2_key),
+         status = COALESCE($15, status)
+     WHERE id = $16
      RETURNING *`,
     [
       updates.title ?? null,
@@ -513,6 +523,7 @@ export async function updateSubmission(
       updates.fileName ?? null,
       updates.fileSize ?? null,
       updates.fileSizeBytes ?? null,
+      updates.fileHash ?? null,
       updates.r2Key ?? null,
       updates.status ?? null,
       submissionId,
@@ -912,7 +923,7 @@ export async function upsertReadingProgress(
      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
      ON CONFLICT (user_id, resource_id)
      DO UPDATE SET
-       percentage = GREATEST(reading_progress.percentage, EXCLUDED.percentage),
+       percentage = EXCLUDED.percentage,
        page = EXCLUDED.page,
        updated_at = CURRENT_TIMESTAMP
      RETURNING user_id AS "userId", resource_id AS "resourceId", percentage, page, updated_at AS "updatedAt"`,
@@ -986,4 +997,168 @@ export async function getUserResourceReadingProgress(
     updatedAt:
       row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
   };
+}
+
+export interface DuplicateSubmissionMatch {
+  id: string;
+  title: string;
+  courseCode: string;
+  status: SubmissionStatus;
+}
+
+/**
+ * Checks whether an active (`PENDING_REVIEW` or `APPROVED`) submission already exists
+ * with the same SHA-256 file hash. Uses partial index `idx_submissions_active_file_hash`.
+ */
+export async function findDuplicateSubmissionByHash(
+  fileHash: string,
+  excludeSubmissionId?: string
+): Promise<DuplicateSubmissionMatch | null> {
+  const normalized = fileHash.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(normalized)) return null;
+
+  if (isDevMemoryMode()) {
+    const match = devStore.submissions.find(
+      (s) =>
+        s.fileHash === normalized &&
+        (s.status === "PENDING_REVIEW" || s.status === "APPROVED") &&
+        (!excludeSubmissionId || s.id !== excludeSubmissionId)
+    );
+    return match
+      ? {
+          id: match.id,
+          title: match.title,
+          courseCode: match.courseCode,
+          status: match.status,
+        }
+      : null;
+  }
+
+  const db = await getReadyDb();
+  const res = excludeSubmissionId
+    ? await db.query(
+        `SELECT id, title, course_code AS "courseCode", status
+         FROM submissions
+         WHERE file_hash = $1
+           AND status IN ('PENDING_REVIEW', 'APPROVED')
+           AND id <> $2
+         ORDER BY CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END, created_at DESC
+         LIMIT 1`,
+        [normalized, excludeSubmissionId]
+      )
+    : await db.query(
+        `SELECT id, title, course_code AS "courseCode", status
+         FROM submissions
+         WHERE file_hash = $1
+           AND status IN ('PENDING_REVIEW', 'APPROVED')
+         ORDER BY CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END, created_at DESC
+         LIMIT 1`,
+        [normalized]
+      );
+
+  if (!res.rows[0]) return null;
+  const row = res.rows[0];
+  return {
+    id: String(row.id),
+    title: String(row.title),
+    courseCode: String(row.courseCode),
+    status: row.status as SubmissionStatus,
+  };
+}
+
+/**
+ * Checks whether an active (`PENDING_REVIEW` or `APPROVED`) YouTube submission already
+ * exists for the same YouTube video ID. Uses partial index `idx_submissions_active_youtube_id`.
+ */
+export async function findDuplicateSubmissionByYoutubeId(
+  youtubeVideoId: string,
+  excludeSubmissionId?: string
+): Promise<DuplicateSubmissionMatch | null> {
+  const cleanId = youtubeVideoId.trim();
+  if (!cleanId) return null;
+
+  if (isDevMemoryMode()) {
+    const match = devStore.submissions.find(
+      (s) =>
+        s.medium === "YOUTUBE" &&
+        s.youtubeVideoId === cleanId &&
+        (s.status === "PENDING_REVIEW" || s.status === "APPROVED") &&
+        (!excludeSubmissionId || s.id !== excludeSubmissionId)
+    );
+    return match
+      ? {
+          id: match.id,
+          title: match.title,
+          courseCode: match.courseCode,
+          status: match.status,
+        }
+      : null;
+  }
+
+  const db = await getReadyDb();
+  const res = excludeSubmissionId
+    ? await db.query(
+        `SELECT id, title, course_code AS "courseCode", status
+         FROM submissions
+         WHERE youtube_video_id = $1
+           AND status IN ('PENDING_REVIEW', 'APPROVED')
+           AND id <> $2
+         ORDER BY CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END, created_at DESC
+         LIMIT 1`,
+        [cleanId, excludeSubmissionId]
+      )
+    : await db.query(
+        `SELECT id, title, course_code AS "courseCode", status
+         FROM submissions
+         WHERE youtube_video_id = $1
+           AND status IN ('PENDING_REVIEW', 'APPROVED')
+         ORDER BY CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END, created_at DESC
+         LIMIT 1`,
+        [cleanId]
+      );
+
+  if (!res.rows[0]) return null;
+  const row = res.rows[0];
+  return {
+    id: String(row.id),
+    title: String(row.title),
+    courseCode: String(row.courseCode),
+    status: row.status as SubmissionStatus,
+  };
+}
+
+/**
+ * Lightweight projection for `app/sitemap.ts` so sitemap generation never fetches
+ * full submission rows or fails on oversized catalogs.
+ */
+export async function getApprovedResourcesForSitemap(
+  limit: number = 5000
+): Promise<Array<{ id: string; createdAt: string }>> {
+  const safeLimit = Math.min(Math.max(1, limit), 10000);
+
+  if (isDevMemoryMode()) {
+    return devStore.submissions
+      .filter((s) => s.status === "APPROVED")
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, safeLimit)
+      .map((s) => ({ id: s.id, createdAt: s.createdAt }));
+  }
+
+  const db = await getReadyDb();
+  const res = await db.query(
+    `SELECT id, created_at
+     FROM submissions
+     WHERE status = 'APPROVED'
+     ORDER BY created_at DESC
+     LIMIT $1`,
+    [safeLimit]
+  );
+
+  return res.rows.map((row) => ({
+    id: String(row.id),
+    createdAt:
+      row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : String(row.created_at ?? new Date().toISOString()),
+  }));
 }

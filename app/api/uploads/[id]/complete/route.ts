@@ -1,9 +1,12 @@
+import { after } from "next/server";
 import { getSession } from "@/lib/auth";
 import {
   getSubmissionById,
   updateSubmission,
   deleteSubmissionWithChecks,
+  findDuplicateSubmissionByHash,
 } from "@/lib/db";
+import { sendNewSubmissionAlertEmail } from "@/lib/email";
 import {
   isR2Configured,
   verifyR2PdfObject,
@@ -102,13 +105,64 @@ export async function POST(
       );
     }
 
+    // Race-safe duplicate check: if another identical file completed while this upload was in flight
+    const effectiveFileHash =
+      submission.fileHash ||
+      (typeof body?.fileHash === "string" && /^[a-f0-9]{64}$/i.test(body.fileHash.trim())
+        ? body.fileHash.trim().toLowerCase()
+        : undefined);
+
+    if (effectiveFileHash) {
+      const duplicateDoc = await findDuplicateSubmissionByHash(effectiveFileHash, id);
+      if (duplicateDoc) {
+        await deleteR2Object(targetKey);
+        await deleteSubmissionWithChecks(
+          { userId: session.userId, role: session.role },
+          id
+        );
+        const statusLabel =
+          duplicateDoc.status === "APPROVED"
+            ? "is already published in the library"
+            : "is already pending moderator review";
+        return Response.json(
+          {
+            success: false,
+            error: {
+              code: "DUPLICATE_RESOURCE",
+              message: `This exact file ${statusLabel} as "${duplicateDoc.title}" (${duplicateDoc.courseCode}).`,
+            },
+            duplicate: duplicateDoc,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     const updated = await updateSubmission(id, {
       r2Key: targetKey,
       fileUrl: `/api/resources/${id}/view`,
       fileSizeBytes: verifiedBytes,
       fileSize: verifiedBytes ? formatBytes(verifiedBytes) : submission.fileSize,
+      fileHash: effectiveFileHash,
       status: submission.status === "APPROVED" ? "APPROVED" : "PENDING_REVIEW",
     });
+
+    if (updated && updated.status === "PENDING_REVIEW") {
+      const alertPayload = {
+        resourceTitle: updated.title,
+        courseCode: updated.courseCode,
+        department: updated.department,
+        medium: "PDF" as const,
+        uploaderEmail: session.email,
+      };
+      try {
+        after(async () => {
+          await sendNewSubmissionAlertEmail(alertPayload);
+        });
+      } catch {
+        void sendNewSubmissionAlertEmail(alertPayload);
+      }
+    }
 
     return apiSuccess({
       submission: updated,

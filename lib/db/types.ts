@@ -55,6 +55,7 @@ export interface DbSubmission {
   fileName?: string;
   fileSize?: string;
   fileSizeBytes?: number | null;
+  fileHash?: string;
   r2Key?: string;
   cloudinaryPublicId?: string;
   youtubeUrl?: string;

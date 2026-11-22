@@ -1,5 +1,7 @@
+import { after } from "next/server";
 import { getSession, getSessionWithUser } from "@/lib/auth";
 import {
+  findUserProfileById,
   getAllSubmissions,
   getModerationStatusCounts,
   getSubmissionById,
@@ -7,6 +9,7 @@ import {
 } from "@/lib/db";
 import { apiError, apiSuccess } from "@/lib/api-helpers";
 import { revalidateCatalog } from "@/lib/cache";
+import { sendModerationStatusEmail } from "@/lib/email";
 
 export async function GET(req: Request) {
   try {
@@ -94,6 +97,32 @@ export async function PATCH(req: Request) {
     }
 
     revalidateCatalog(String(submissionId));
+
+    // Notify contributor asynchronously without blocking moderator response
+    const notifyContributor = async () => {
+      try {
+        const contributor = await findUserProfileById(existing.userId);
+        if (!contributor?.email) return;
+        await sendModerationStatusEmail({
+          toEmail: contributor.email,
+          userName: contributor.name,
+          resourceId: updated.id,
+          resourceTitle: updated.title,
+          courseCode: updated.courseCode,
+          status,
+          rejectionReason: updated.rejectionReason,
+        });
+      } catch (err) {
+        console.error("[moderation] Failed to notify contributor:", err);
+      }
+    };
+
+    try {
+      after(notifyContributor);
+    } catch {
+      // Fallback outside Next.js request lifecycle (e.g., direct unit tests)
+      await notifyContributor();
+    }
 
     // Retain storage object pointer on rejection for audit, contributor review, or appeal.
     // Permanent purge is mediated by explicit contributor withdrawal or lifecycle rules.

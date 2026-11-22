@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { resolveCourseMetadata } from "@/lib/courses";
+import { extractApiError } from "@/lib/api-helpers";
 import { useTrackedBlobUrl } from "@/lib/hooks/useTrackedBlobUrl";
 import {
   type CourseMaterialItem,
@@ -18,7 +20,7 @@ import { getResourceBadgeStyle } from "@/lib/badge-styles";
 import {
   getOfflineDocument,
   getCachedCatalogResources,
-  getReadingProgress,
+  syncReadingProgress,
   saveReadingProgress,
 } from "@/lib/offline-vault";
 import { useSavedResources } from "@/context/SavedResourcesContext";
@@ -39,9 +41,28 @@ import {
   Share2,
   Check,
   CheckCircle2,
+  Flag,
 } from "lucide-react";
 import { getFileFormatDisplay } from "@/lib/file-utils";
 import DocumentFallbackPreview from "@/components/DocumentFallbackPreview";
+
+const PdfCanvasViewer = dynamic(() => import("@/components/PdfCanvasViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex flex-col items-center justify-center p-8 text-slate-500">
+      <Loader2 className="w-7 h-7 text-[#00875A] animate-spin mb-2" />
+      <p className="text-xs font-medium">Loading mobile-ready PDF reader...</p>
+    </div>
+  ),
+});
+
+const REPORT_REASONS = [
+  "Corrupted or unreadable document",
+  "Wrong course code or department",
+  "Duplicate or outdated material",
+  "Broken video link",
+  "Inappropriate content",
+];
 
 interface ResourceReaderClientProps {
   resourceId: string;
@@ -69,7 +90,17 @@ export default function ResourceReaderClient({
   const [savingBookmark, setSavingBookmark] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [readingPct, setReadingPct] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
   const [videoActivated, setVideoActivated] = useState(false);
+
+  // Student "Report Issue" bar state
+  const [showReportBar, setShowReportBar] = useState(false);
+  const [reportReason, setReportReason] = useState(REPORT_REASONS[0]);
+  const [reportDetails, setReportDetails] = useState("");
+  const [submittingReport, setSubmittingReport] = useState(false);
+  const [reportSubmitted, setReportSubmitted] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const progressTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -80,13 +111,14 @@ export default function ResourceReaderClient({
       try {
         let found: CourseMaterialItem | null = initialResource;
 
-        // 1. Check IndexedDB offline vault first for instant offline availability
+        // 1. Check IndexedDB offline vault + hydrate cross-device reading progress
         const [offlineDoc, existingProg] = await Promise.all([
           getOfflineDocument(resourceId),
-          getReadingProgress(resourceId),
+          syncReadingProgress(resourceId),
         ]);
         if (mounted && existingProg) {
           setReadingPct(existingProg.percentage);
+          setCurrentPage(Math.max(1, existingProg.page || 1));
         }
 
         if (offlineDoc) {
@@ -147,11 +179,65 @@ export default function ResourceReaderClient({
     return () => {
       mounted = false;
       if (studyTimer) window.clearTimeout(studyTimer);
+      if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
       if (createdBlobUrl) {
         revokeTrackedUrl(createdBlobUrl);
       }
     };
   }, [resourceId, initialResource, createTrackedUrl, revokeTrackedUrl]);
+
+  const handlePageChange = useCallback(
+    (page: number, totalPages: number) => {
+      const targetId = resource?.resourceId || resource?.id || resourceId;
+      const pct =
+        totalPages > 0 ? Math.max(1, Math.min(100, Math.round((page / totalPages) * 100))) : 25;
+      setCurrentPage(page);
+      setReadingPct((prev) => (prev >= 100 && page < totalPages ? prev : Math.max(prev, pct)));
+
+      if (progressTimerRef.current) {
+        window.clearTimeout(progressTimerRef.current);
+      }
+      progressTimerRef.current = window.setTimeout(() => {
+        void saveReadingProgress(targetId, pct, page);
+      }, 900);
+    },
+    [resource, resourceId]
+  );
+
+  const handleSubmitReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resource) return;
+    setReportError(null);
+    const targetId = resource.resourceId || resource.id;
+    try {
+      setSubmittingReport(true);
+      const res = await fetch(`/api/resources/${encodeURIComponent(targetId)}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          resourceTitle: resource.title,
+          courseCode: resource.courseCode,
+          reason: reportReason,
+          details: reportDetails.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setReportError(extractApiError(data, "Could not submit report."));
+        return;
+      }
+      setReportSubmitted(true);
+      setReportDetails("");
+      window.setTimeout(() => {
+        setShowReportBar(false);
+        setReportSubmitted(false);
+      }, 2200);
+    } catch {
+      setReportError("Network error. Please try again.");
+    } finally {
+      setSubmittingReport(false);
+    }
+  };
 
   const handleToggleBookmark = async () => {
     if (!resource) return;
@@ -242,7 +328,7 @@ export default function ResourceReaderClient({
                 onClick={async () => {
                   const nextPct = readingPct >= 100 ? 25 : 100;
                   setReadingPct(nextPct);
-                  await saveReadingProgress(canonicalId, nextPct, 1);
+                  await saveReadingProgress(canonicalId, nextPct, currentPage);
                 }}
                 className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
                   readingPct >= 100
@@ -252,6 +338,25 @@ export default function ResourceReaderClient({
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>{readingPct >= 100 ? "Completed" : "Mark Completed"}</span>
+              </button>
+            )}
+            {!isOffline && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReportBar((prev) => !prev);
+                  setReportError(null);
+                }}
+                aria-label="Report issue with this material"
+                title="Report broken file, illegible scan, or wrong course code"
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                  showReportBar
+                    ? "border-amber-300 bg-amber-50 text-amber-800"
+                    : "border-slate-200 bg-white text-slate-600 hover:text-amber-700 hover:bg-amber-50/50"
+                }`}
+              >
+                <Flag className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Report Issue</span>
               </button>
             )}
             <button
@@ -343,6 +448,71 @@ export default function ResourceReaderClient({
             )}
           </div>
         </div>
+
+        {/* Inline Student Issue Report Panel */}
+        {showReportBar && (
+          <div className="mb-6 px-4 sm:px-6 py-4 rounded-2xl bg-amber-50/90 border border-amber-200 shadow-2xs">
+            {reportSubmitted ? (
+              <div className="text-xs sm:text-sm font-semibold text-emerald-800 flex items-center gap-2">
+                <Check className="w-4 h-4 text-[#00875A]" />
+                <span>Thank you — this material has been flagged for faculty moderators.</span>
+              </div>
+            ) : (
+              <form
+                onSubmit={handleSubmitReport}
+                className="flex flex-col sm:flex-row sm:items-center gap-2.5"
+              >
+                <label
+                  htmlFor="reader-report-reason"
+                  className="text-xs font-bold text-amber-900 shrink-0"
+                >
+                  Report Issue:
+                </label>
+                <select
+                  id="reader-report-reason"
+                  value={reportReason}
+                  onChange={(e) => setReportReason(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-amber-300 bg-white text-xs font-semibold text-slate-800"
+                >
+                  {REPORT_REASONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  aria-label="Additional report details"
+                  value={reportDetails}
+                  onChange={(e) => setReportDetails(e.target.value)}
+                  placeholder="Optional note (e.g. pages 4–6 blurry or wrong course code)"
+                  className="flex-1 px-3 py-2 rounded-xl border border-amber-300 bg-white text-xs text-slate-800"
+                />
+                {reportError && (
+                  <span className="text-xs font-semibold text-rose-700">
+                    {reportError}
+                  </span>
+                )}
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="submit"
+                    disabled={submittingReport}
+                    className="px-3.5 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold cursor-pointer disabled:opacity-60"
+                  >
+                    {submittingReport ? "Sending..." : "Submit Report"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowReportBar(false)}
+                    className="px-2 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
 
         {/* Header Banner */}
         <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-xs mb-6">
@@ -522,11 +692,11 @@ export default function ResourceReaderClient({
                       onDownload={() => downloadMaterial(resource, { saveToDevice: true })}
                     />
                   ) : pdfSrc ? (
-                    <iframe
-                      src={`${pdfSrc}#toolbar=1&view=FitH`}
+                    <PdfCanvasViewer
+                      src={pdfSrc}
                       title={resource.title}
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-downloads"
-                      className="w-full h-full border-0"
+                      initialPage={currentPage}
+                      onPageChange={handlePageChange}
                     />
                   ) : isOffline ? (
                     <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center text-slate-500">

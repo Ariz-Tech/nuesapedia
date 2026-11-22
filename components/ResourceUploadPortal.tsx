@@ -2,6 +2,7 @@
 
 import { useState, useRef, ChangeEvent, DragEvent, FormEvent, useMemo } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   UploadCloud,
   FileText,
@@ -86,7 +87,28 @@ export default function ResourceUploadPortal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState("");
+  const [duplicateMatch, setDuplicateMatch] = useState<{
+    id: string;
+    title: string;
+    courseCode: string;
+    status: string;
+  } | null>(null);
   const [successSubmission, setSuccessSubmission] = useState<DbSubmission | null>(null);
+
+  async function computeFileSha256(targetFile: File): Promise<string | undefined> {
+    if (typeof window === "undefined" || !window.crypto?.subtle) {
+      return undefined;
+    }
+    try {
+      const buffer = await targetFile.arrayBuffer();
+      const digest = await window.crypto.subtle.digest("SHA-256", buffer);
+      return Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    } catch {
+      return undefined;
+    }
+  }
 
   // Auto-detect YouTube video ID
   const detectedVideoId = useMemo(() => {
@@ -160,6 +182,7 @@ export default function ResourceUploadPortal({
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErrorMessage("");
+    setDuplicateMatch(null);
 
     if (!courseCode.trim() || !title.trim()) {
       setErrorMessage("Please provide both Course Code and Resource Title.");
@@ -209,6 +232,9 @@ export default function ResourceUploadPortal({
 
         const data = await response.json();
         if (!response.ok || !data.success) {
+          if (response.status === 409 && data.duplicate) {
+            setDuplicateMatch(data.duplicate);
+          }
           throw new Error(
             extractApiError(data, "Failed to submit YouTube tutorial.")
           );
@@ -220,6 +246,10 @@ export default function ResourceUploadPortal({
         if (onSuccess) onSuccess(submission);
       } else {
         // FLOW 3: CLOUDFLARE R2 DIRECT UPLOAD PIPELINE
+        // Step 0: Compute SHA-256 fingerprint locally to catch duplicate files before consuming upload bandwidth
+        setUploadProgress(18);
+        const fileHash = await computeFileSha256(file!);
+
         // Step 1: Request pre-signed direct R2 upload URL
         setUploadProgress(20);
         const initResponse = await fetch("/api/uploads", {
@@ -238,12 +268,16 @@ export default function ResourceUploadPortal({
             fileName: file!.name,
             fileSize: `${(file!.size / (1024 * 1024)).toFixed(1)} MB`,
             fileSizeBytes: file!.size,
+            fileHash,
             contentType: file!.type || getMimeTypeForFilename(file!.name),
           }),
         });
 
         const initData = await initResponse.json();
         if (!initResponse.ok || !initData.success) {
+          if (initResponse.status === 409 && initData.duplicate) {
+            setDuplicateMatch(initData.duplicate);
+          }
           throw new Error(
             extractApiError(initData, "Failed to initiate Cloudflare R2 upload.")
           );
@@ -307,11 +341,14 @@ export default function ResourceUploadPortal({
         const completeResponse = await fetch(`/api/uploads/${uploadId}/complete`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ uploadId, r2Key }),
+          body: JSON.stringify({ uploadId, r2Key, fileHash }),
         });
 
         const completeData = await completeResponse.json();
         if (!completeResponse.ok || !completeData.success) {
+          if (completeResponse.status === 409 && completeData.duplicate) {
+            setDuplicateMatch(completeData.duplicate);
+          }
           throw new Error(
             extractApiError(completeData, "Failed to verify upload completion.")
           );
@@ -457,11 +494,25 @@ export default function ResourceUploadPortal({
           className="mt-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 flex items-start gap-2.5 text-xs animate-ui-fade"
         >
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <div className="flex-1 font-medium">{errorMessage}</div>
+          <div className="flex-1 font-medium space-y-1.5">
+            <div>{errorMessage}</div>
+            {duplicateMatch && duplicateMatch.status === "APPROVED" && (
+              <Link
+                href={`/resources/${encodeURIComponent(duplicateMatch.id)}`}
+                className="inline-flex items-center gap-1 text-xs font-bold text-[#00875A] hover:underline"
+              >
+                <span>Open existing material ({duplicateMatch.courseCode})</span>
+                <ExternalLink className="w-3 h-3" />
+              </Link>
+            )}
+          </div>
           <button
             type="button"
             aria-label="Dismiss error"
-            onClick={() => setErrorMessage("")}
+            onClick={() => {
+              setErrorMessage("");
+              setDuplicateMatch(null);
+            }}
             className="text-rose-500 hover:text-rose-700 cursor-pointer"
           >
             <X className="w-4 h-4" />

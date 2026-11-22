@@ -53,8 +53,21 @@ jobs:
       - name: Apply database migrations
         run: npm run db:migrate
 
+      - name: Verify database seed (idempotent)
+        run: |
+          npm run db:seed
+          npm run db:seed
+        env:
+          SEED_ADMIN_PASSWORD: CiSeedPassword2026!
+
       - name: Security & contract unit tests
         run: npm test
 
+      - name: PostgreSQL integration tests
+        run: npm run test:integration
+
       - name: Production build
         run: npm run build
+
+      - name: End-to-end HTTP flow tests
+        run: npm run test:e2e

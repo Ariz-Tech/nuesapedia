@@ -36,7 +36,7 @@ const pool = new pg.Pool({
 });
 
 try {
-  console.log("Applying NUESApedia database migrations...");
+  console.log("Applying The NUESA Library database migrations...");
   // Apply the entire schema inside one transaction so a mid-file failure rolls
   // back cleanly instead of leaving a partially-migrated database behind.
   await pool.query("BEGIN");

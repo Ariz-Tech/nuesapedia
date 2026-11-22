@@ -634,5 +634,155 @@ test("getModerationStatusCounts and getApprovedCourses department pushdown retur
   );
 });
 
+test("SHA-256 and YouTube deduplication block active duplicates while ignoring rejected/uploading rows", async () => {
+  const {
+    findDuplicateSubmissionByHash,
+    findDuplicateSubmissionByYoutubeId,
+  } = await import("@/lib/db/submissions");
+
+  const sampleHash = "a".repeat(64);
+  const uploading = await createSubmission({
+    id: `sub_dup_up_${Date.now()}`,
+    userId: "usr_dup",
+    title: "In-flight Duplicate",
+    courseCode: "MEE 301",
+    department: "Mechanical Engineering",
+    level: "300L",
+    semester: "First Semester",
+    type: "Lecture Note",
+    medium: "PDF",
+    fileHash: sampleHash,
+    status: "UPLOADING",
+  });
+  // UPLOADING reservations should NOT block other uploads
+  assert.equal(await findDuplicateSubmissionByHash(sampleHash), null);
+  assert.ok(uploading.id);
+
+  const activePdf = await createSubmission({
+    id: `sub_dup_live_${Date.now()}`,
+    userId: "usr_dup",
+    title: "Verified Thermodynamics Notes",
+    courseCode: "MEE 301",
+    department: "Mechanical Engineering",
+    level: "300L",
+    semester: "First Semester",
+    type: "Lecture Note",
+    medium: "PDF",
+    fileHash: sampleHash,
+    status: "APPROVED",
+  });
+
+  const foundPdf = await findDuplicateSubmissionByHash(sampleHash);
+  assert.ok(foundPdf);
+  assert.equal(foundPdf.id, activePdf.id);
+  assert.equal(foundPdf.status, "APPROVED");
+  // Excluding self returns null
+  assert.equal(await findDuplicateSubmissionByHash(sampleHash, activePdf.id), null);
+  // Invalid hash returns null safely
+  assert.equal(await findDuplicateSubmissionByHash("not-a-sha256"), null);
+
+  const ytId = "z9Y8x7W6v5U";
+  const activeYt = await createSubmission({
+    id: `sub_dup_yt_${Date.now()}`,
+    userId: "usr_dup",
+    title: "Fluid Dynamics Lecture",
+    courseCode: "CVE 304",
+    department: "Civil Engineering",
+    level: "300L",
+    semester: "Second Semester",
+    type: "Video Tutorial",
+    medium: "YOUTUBE",
+    youtubeUrl: `https://www.youtube.com/watch?v=${ytId}`,
+    youtubeVideoId: ytId,
+    status: "PENDING_REVIEW",
+  });
+
+  const foundYt = await findDuplicateSubmissionByYoutubeId(ytId);
+  assert.ok(foundYt);
+  assert.equal(foundYt.id, activeYt.id);
+});
+
+test("Moderation email notifications escape HTML and gracefully operate in dev mode", async () => {
+  const {
+    sendModerationStatusEmail,
+    sendNewSubmissionAlertEmail,
+    escapeHtml,
+    getModeratorAlertRecipients,
+  } = await import("@/lib/email");
+
+  delete process.env.RESEND_API_KEY;
+  delete process.env.MODERATOR_ALERT_EMAILS;
+
+  assert.equal(escapeHtml(`<script>alert("x")</script>`), "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;");
+
+  const approvedRes = await sendModerationStatusEmail({
+    toEmail: "student@fuoye.edu.ng",
+    userName: "Adaeze",
+    resourceId: "sub_123",
+    resourceTitle: "Strength of Materials",
+    courseCode: "CVE 201",
+    status: "APPROVED",
+  });
+  assert.equal(approvedRes.delivered, true);
+
+  const rejectedRes = await sendModerationStatusEmail({
+    toEmail: "student@fuoye.edu.ng",
+    userName: "Adaeze",
+    resourceId: "sub_124",
+    resourceTitle: "Blurry Scan",
+    courseCode: "CVE 201",
+    status: "REJECTED",
+    rejectionReason: "Pages 3 to 5 are illegible.",
+  });
+  assert.equal(rejectedRes.delivered, true);
+
+  assert.deepEqual(getModeratorAlertRecipients(), []);
+  const noAlert = await sendNewSubmissionAlertEmail({
+    resourceTitle: "Test",
+    courseCode: "MEE 301",
+    department: "Mechanical Engineering",
+    medium: "PDF",
+  });
+  assert.equal(noAlert.delivered, false);
+  assert.equal(noAlert.reason, "NO_RECIPIENTS");
+});
+
+test("Expanded FUOYE course registry covers all 5 departments and 100L–500L levels", async () => {
+  const { COURSE_REGISTRY } = await import("@/lib/courses");
+  const courses = Object.values(COURSE_REGISTRY);
+  assert.ok(courses.length >= 60, `Expected >= 60 courses, got ${courses.length}`);
+
+  for (const dept of DEPARTMENTS) {
+    assert.ok(
+      courses.some((c) => c.department === dept),
+      `Expected courses for ${dept}`
+    );
+  }
+  for (const lvl of ["100L", "200L", "300L", "400L", "500L"]) {
+    assert.ok(
+      courses.some((c) => c.level === lvl),
+      `Expected courses for ${lvl}`
+    );
+  }
+});
+
+test("SEO robots and sitemap routes expose public catalog and protect private paths", async () => {
+  const { default: robots } = await import("@/app/robots");
+  const { default: sitemap } = await import("@/app/sitemap");
+
+  const r = robots();
+  const rules = Array.isArray(r.rules) ? r.rules : [r.rules];
+  const disallow = rules.flatMap((rule) =>
+    Array.isArray(rule.disallow) ? rule.disallow : rule.disallow ? [rule.disallow] : []
+  );
+  assert.ok(disallow.includes("/api/"));
+  assert.ok(disallow.includes("/moderation"));
+  assert.ok(typeof r.sitemap === "string" && r.sitemap.endsWith("/sitemap.xml"));
+
+  const entries = await sitemap();
+  assert.ok(entries.length >= 2);
+  assert.ok(entries.some((e) => e.url.endsWith("/resources")));
+});
+
 
 

@@ -484,6 +484,102 @@ export async function getReadingProgress(
   }
 }
 
+/**
+ * Hydrates reading progress across devices by reconciling IndexedDB with
+ * `GET /api/resources/:id/progress` for signed-in users.
+ * Picks the newer record by `updatedAt` (or server when local has none),
+ * persists the winner locally, and silently returns local state for guests/offline.
+ */
+export async function syncReadingProgress(
+  resourceId: string
+): Promise<ReadingProgressRecord | null> {
+  const local = await getReadingProgress(resourceId);
+
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    return local;
+  }
+
+  try {
+    const res = await fetch(
+      `/api/resources/${encodeURIComponent(resourceId)}/progress`,
+      {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      }
+    );
+
+    if (!res.ok) {
+      return local;
+    }
+
+    const data = await res.json().catch(() => null);
+    const remote = data?.progress;
+    if (
+      !data?.success ||
+      !remote ||
+      (!remote.updatedAt && (remote.percentage ?? 0) === 0 && (remote.page ?? 1) <= 1)
+    ) {
+      // Server has no saved progress yet; push local progress up if present
+      if (local && (local.percentage > 0 || local.page > 1)) {
+        fetch(`/api/resources/${encodeURIComponent(resourceId)}/progress`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            percentage: local.percentage,
+            page: local.page,
+          }),
+        }).catch(() => {});
+      }
+      return local;
+    }
+
+    const remoteRecord: ReadingProgressRecord = {
+      id: resourceId,
+      percentage: Math.max(0, Math.min(100, Math.round(Number(remote.percentage) || 0))),
+      page: Math.max(1, Math.round(Number(remote.page) || 1)),
+      updatedAt:
+        typeof remote.updatedAt === "string" && remote.updatedAt
+          ? remote.updatedAt
+          : new Date().toISOString(),
+    };
+
+    const localTime = local?.updatedAt ? new Date(local.updatedAt).getTime() : 0;
+    const remoteTime = new Date(remoteRecord.updatedAt).getTime();
+
+    if (!local || remoteTime >= localTime) {
+      try {
+        const db = await openVaultDb();
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(PROGRESS_STORE, "readwrite");
+          tx.objectStore(PROGRESS_STORE).put(remoteRecord);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent(READING_PROGRESS_EVENT));
+        }
+      } catch {
+        // Ignore IndexedDB error
+      }
+      return remoteRecord;
+    }
+
+    // Local progress is newer — push up to server so other devices catch up
+    fetch(`/api/resources/${encodeURIComponent(resourceId)}/progress`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        percentage: local.percentage,
+        page: local.page,
+      }),
+    }).catch(() => {});
+    return local;
+  } catch {
+    return local;
+  }
+}
+
 export async function getAllReadingProgress(): Promise<ReadingProgressRecord[]> {
   try {
     const db = await openVaultDb();
