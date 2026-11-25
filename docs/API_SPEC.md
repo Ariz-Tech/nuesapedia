@@ -54,6 +54,7 @@ Client callers use `extractApiError(data, fallback)` in `lib/api-helpers.ts` to 
 | `GET` | `/api/resources/:id/view` | Public (if `APPROVED`) / Owner / Mod | Redirects (`302`) to freshly minted 15-minute `inline` signed R2 URL (or JSON with `?format=json`). |
 | `GET` | `/api/resources/:id/download` | Public (if `APPROVED`) / Owner / Mod | Atomically increments `downloads` (for approved items) and redirects (`302`) to freshly minted `attachment` signed R2 URL. |
 | `GET` / `PUT` | `/api/resources/:id/progress` | Session | Reads or upserts per-user reading progress (`percentage`, `page`). |
+| `POST` | `/api/ai/chat` | Session (rate-limited) | Streams (SSE) or returns JSON study companion answers grounded in resource metadata & lazily extracted PDF page text via OpenRouter (`20 req / 15 min` per user). |
 | `POST` | `/api/resources/:id/report` | Public (rate-limited) | Submits a quality/broken-file report for resource `:id`. |
 | `GET` / `POST` / `DELETE` | `/api/saved` | Session | Lists, adds, or removes user-scoped bookmarks (`LEFT JOIN submissions`). |
 | `GET` | `/api/courses` | Public | Lists canonical + approved database courses (`DISTINCT ON` chronological metadata + counts). |

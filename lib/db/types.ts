@@ -39,9 +39,19 @@ export interface DbSavedResource {
   downloads?: number;
 }
 
+export interface SubmissionContributor {
+  id: string;
+  name: string;
+  email: string;
+  department: string;
+  level: string;
+  avatar?: string;
+}
+
 export interface DbSubmission {
   id: string;
   userId: string;
+  submittedBy?: SubmissionContributor;
   title: string;
   courseCode: string;
   department: string;

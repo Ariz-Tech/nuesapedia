@@ -45,6 +45,8 @@ import {
 } from "lucide-react";
 import { getFileFormatDisplay } from "@/lib/file-utils";
 import DocumentFallbackPreview from "@/components/DocumentFallbackPreview";
+import AiStudyCompanion from "@/components/AiStudyCompanion";
+import type { PdfPageText } from "@/lib/ai-context";
 
 const PdfCanvasViewer = dynamic(() => import("@/components/PdfCanvasViewer"), {
   ssr: false,
@@ -91,6 +93,8 @@ export default function ResourceReaderClient({
   const [copiedLink, setCopiedLink] = useState(false);
   const [readingPct, setReadingPct] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState<number | undefined>(undefined);
+  const [targetPage, setTargetPage] = useState<{ page: number; nonce: number } | null>(null);
   const [videoActivated, setVideoActivated] = useState(false);
 
   // Student "Report Issue" bar state
@@ -101,6 +105,7 @@ export default function ResourceReaderClient({
   const [reportSubmitted, setReportSubmitted] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const progressTimerRef = useRef<number | null>(null);
+  const pdfTextExtractorRef = useRef<(() => Promise<PdfPageText[]>) | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -187,12 +192,13 @@ export default function ResourceReaderClient({
   }, [resourceId, initialResource, createTrackedUrl, revokeTrackedUrl]);
 
   const handlePageChange = useCallback(
-    (page: number, totalPages: number) => {
+    (page: number, pagesCount: number) => {
       const targetId = resource?.resourceId || resource?.id || resourceId;
       const pct =
-        totalPages > 0 ? Math.max(1, Math.min(100, Math.round((page / totalPages) * 100))) : 25;
+        pagesCount > 0 ? Math.max(1, Math.min(100, Math.round((page / pagesCount) * 100))) : 25;
       setCurrentPage(page);
-      setReadingPct((prev) => (prev >= 100 && page < totalPages ? prev : Math.max(prev, pct)));
+      if (pagesCount > 0) setTotalPages(pagesCount);
+      setReadingPct((prev) => (prev >= 100 && page < pagesCount ? prev : Math.max(prev, pct)));
 
       if (progressTimerRef.current) {
         window.clearTimeout(progressTimerRef.current);
@@ -203,6 +209,20 @@ export default function ResourceReaderClient({
     },
     [resource, resourceId]
   );
+
+  const handleTextExtractorReady = useCallback(
+    (extractor: (() => Promise<PdfPageText[]>) | null) => {
+      pdfTextExtractorRef.current = extractor;
+    },
+    []
+  );
+
+  const getPdfTextExtractor = useCallback(() => pdfTextExtractorRef.current, []);
+
+  const handleJumpToPage = useCallback((page: number) => {
+    setActiveTab("reader");
+    setTargetPage({ page, nonce: Date.now() });
+  }, []);
 
   const handleSubmitReport = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -300,6 +320,10 @@ export default function ResourceReaderClient({
   const onlinePdfViewUrl = getMaterialViewUrl(resource);
   const canDownloadPdf = !isVideo && (!isOffline || cachedOffline);
   const pdfSrc = offlineBlobUrl || (!isOffline ? onlinePdfViewUrl : undefined);
+  const formatInfo = getFileFormatDisplay(resource.fileName);
+  const isOfficeFallback =
+    formatInfo.isPresentation || formatInfo.isWord || formatInfo.isSpreadsheet;
+  const showAiStudyCompanion = !isVideo && !isOfficeFallback;
   const courseMeta = resolveCourseMetadata(resource.courseCode, {
     department: resource.department,
     level: resource.level,
@@ -680,11 +704,7 @@ export default function ResourceReaderClient({
                 )}
 
                 <div className="relative w-full h-[65vh] min-h-[420px] sm:h-[75vh] max-h-[860px] rounded-2xl border border-slate-200 overflow-hidden bg-slate-100 shadow-inner">
-                  {pdfSrc &&
-                  (() => {
-                    const formatInfo = getFileFormatDisplay(resource.fileName);
-                    return formatInfo.isPresentation || formatInfo.isWord || formatInfo.isSpreadsheet;
-                  })() ? (
+                  {pdfSrc && isOfficeFallback ? (
                     <DocumentFallbackPreview
                       title={resource.title}
                       fileName={resource.fileName}
@@ -696,7 +716,9 @@ export default function ResourceReaderClient({
                       src={pdfSrc}
                       title={resource.title}
                       initialPage={currentPage}
+                      targetPage={targetPage}
                       onPageChange={handlePageChange}
+                      onTextExtractorReady={handleTextExtractorReady}
                     />
                   ) : isOffline ? (
                     <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center text-slate-500">
@@ -768,6 +790,20 @@ export default function ResourceReaderClient({
           </div>
         )}
       </main>
+
+      {showAiStudyCompanion && (
+        <AiStudyCompanion
+          key={canonicalId}
+          resourceId={canonicalId}
+          resourceTitle={resource.title}
+          courseCode={resource.courseCode}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          isOffline={isOffline}
+          getPdfTextExtractor={getPdfTextExtractor}
+          onJumpToPage={handleJumpToPage}
+        />
+      )}
 
       <Footer />
     </div>

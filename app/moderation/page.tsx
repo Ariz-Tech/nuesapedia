@@ -379,7 +379,11 @@ export default function ModerationPortalPage() {
 
       setSubmissions((prev) =>
         statusFilter === "ALL" || statusFilter === "APPROVED"
-          ? prev.map((item) => (item.id === submissionId ? data.submission : item))
+          ? prev.map((item) =>
+              item.id === submissionId
+                ? { ...data.submission, submittedBy: data.submission.submittedBy ?? item.submittedBy }
+                : item
+            )
           : prev.filter((item) => item.id !== submissionId)
       );
       setStatusCounts((prev) => ({
@@ -431,7 +435,11 @@ export default function ModerationPortalPage() {
 
       setSubmissions((prev) =>
         statusFilter === "ALL" || statusFilter === "REJECTED"
-          ? prev.map((item) => (item.id === rejectingItem.id ? data.submission : item))
+          ? prev.map((item) =>
+              item.id === rejectingItem.id
+                ? { ...data.submission, submittedBy: data.submission.submittedBy ?? item.submittedBy }
+                : item
+            )
           : prev.filter((item) => item.id !== rejectingItem.id)
       );
       setStatusCounts((prev) => ({
@@ -503,7 +511,10 @@ export default function ModerationPortalPage() {
         const matchesCourse = sub.courseCode.toLowerCase().includes(q);
         const matchesTitle = sub.title.toLowerCase().includes(q);
         const matchesDept = sub.department.toLowerCase().includes(q);
-        if (!matchesCourse && !matchesTitle && !matchesDept) return false;
+        const matchesSubmitter =
+          Boolean(sub.submittedBy?.name.toLowerCase().includes(q)) ||
+          Boolean(sub.submittedBy?.email.toLowerCase().includes(q));
+        if (!matchesCourse && !matchesTitle && !matchesDept && !matchesSubmitter) return false;
       }
       return true;
     });
@@ -911,8 +922,8 @@ export default function ModerationPortalPage() {
                     <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="text"
-                      aria-label="Search review queue by course code or title"
-                      placeholder="Search course or title..."
+                      aria-label="Search review queue by course code, title, or submitter"
+                      placeholder="Search course, title, or submitter..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-emerald/15 focus:border-brand-emerald"
@@ -1025,6 +1036,51 @@ export default function ModerationPortalPage() {
                         <span>{sub.semester}</span>
                         <span>•</span>
                         <span>{sub.type}</span>
+                      </div>
+
+                      {/* Submitter Attribution Row */}
+                      <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-50/90 border border-slate-100 mb-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {sub.submittedBy?.avatar ? (
+                            <Image
+                              src={sub.submittedBy.avatar}
+                              alt={sub.submittedBy.name}
+                              width={24}
+                              height={24}
+                              unoptimized
+                              className="w-6 h-6 rounded-full object-cover bg-white border border-slate-200 shrink-0"
+                            />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-emerald-100 text-[#0C3B2E] text-[10px] font-extrabold flex items-center justify-center shrink-0">
+                              {(sub.submittedBy?.name?.[0] || "S").toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0 leading-tight">
+                            <div className="text-[11px] font-bold text-slate-800 truncate">
+                              {sub.submittedBy ? sub.submittedBy.name : `User ${sub.userId.slice(0, 10)}`}
+                              {sub.submittedBy?.level && (
+                                <span className="ml-1.5 font-semibold text-slate-500">
+                                  ({sub.submittedBy.level})
+                                </span>
+                              )}
+                            </div>
+                            {sub.submittedBy?.email && (
+                              <div className="text-[10px] text-slate-500 truncate">
+                                {sub.submittedBy.email}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {sub.createdAt && (
+                          <span className="text-[10px] font-medium text-slate-400 shrink-0">
+                            {new Date(sub.createdAt).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
+                          </span>
+                        )}
                       </div>
 
                       {/* YouTube Thumbnail Preview if applicable */}

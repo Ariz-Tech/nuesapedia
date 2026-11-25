@@ -122,14 +122,13 @@ export function isTransientConnectionError(err: unknown): boolean {
   if (!err) return false;
   const msg = err instanceof Error ? err.message : String(err);
   const code = (err as { code?: string })?.code;
+  // Note: intentionally exclude connection-timeout errors from automatic retry so
+  // an unreachable/stalled DB does not double a 20s timeout into a 40s hang.
   return (
     msg.includes("Connection terminated unexpectedly") ||
-    msg.includes("Connection terminated due to connection timeout") ||
-    msg.includes("timeout exceeded when trying to connect") ||
     msg.includes("terminating connection due to administrator command") ||
     code === "ECONNRESET" ||
     code === "EPIPE" ||
-    code === "ETIMEDOUT" ||
     code === "57P01" ||
     code === "57P02" ||
     code === "57P03"
@@ -241,15 +240,16 @@ export function getPool(): Pool {
         ? process.env.PG_SSL_REJECT_UNAUTHORIZED === "true"
         : process.env.NODE_ENV === "production";
 
+    const defaultIdleMs = process.env.NODE_ENV === "production" ? 30_000 : 120_000;
     const nextPool = new Pool({
       connectionString,
       max: Number(process.env.PG_POOL_MAX) || 10,
-      idleTimeoutMillis: 15000,
-      connectionTimeoutMillis: 10000,
-      statement_timeout: Number(process.env.PG_STATEMENT_TIMEOUT_MS) || 8000,
-      query_timeout: Number(process.env.PG_QUERY_TIMEOUT_MS) || 10000,
+      idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS) || defaultIdleMs,
+      connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS) || 20_000,
+      statement_timeout: Number(process.env.PG_STATEMENT_TIMEOUT_MS) || 12_000,
+      query_timeout: Number(process.env.PG_QUERY_TIMEOUT_MS) || 15_000,
       keepAlive: true,
-      keepAliveInitialDelayMillis: 10000,
+      keepAliveInitialDelayMillis: 10_000,
       ssl: isLocal ? false : { rejectUnauthorized },
     });
 
@@ -285,6 +285,31 @@ export async function getReadyDb(): Promise<Pool> {
   if (!dbState.schemaEnsurePromise) {
     dbState.schemaEnsurePromise = (async () => {
       try {
+        // Fast single-round-trip check: skip pushing 40+ DDL statements over high-latency
+        // managed Postgres links (e.g. Aiven/Neon) when the schema is already migrated.
+        const probe = await db.query(
+          `SELECT
+             to_regclass('public.users') IS NOT NULL AS has_users,
+             to_regclass('public.submissions') IS NOT NULL AS has_submissions,
+             to_regclass('public.rate_limits') IS NOT NULL AS has_rate_limits,
+             EXISTS (
+               SELECT 1
+               FROM information_schema.columns
+               WHERE table_schema = 'public'
+                 AND table_name = 'submissions'
+                 AND column_name = 'file_hash'
+             ) AS has_latest_columns`
+        );
+        const row = probe.rows[0];
+        if (
+          row?.has_users &&
+          row?.has_submissions &&
+          row?.has_rate_limits &&
+          row?.has_latest_columns
+        ) {
+          return;
+        }
+
         const schemaPath = path.join(process.cwd(), "lib", "db", "schema.sql");
         if (fs.existsSync(schemaPath)) {
           const sql = fs.readFileSync(schemaPath, "utf8");

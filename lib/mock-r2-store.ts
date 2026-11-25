@@ -38,31 +38,36 @@ function keyToHash(key: string): string {
   return crypto.createHash("sha256").update(key).digest("hex");
 }
 
-function createFallbackPdf(title: string = "NUESApedia Document"): Uint8Array {
-  const cleanTitle = title.replace(/[^\x20-\x7E]/g, " ").slice(0, 80);
+function createFallbackPdf(title: string = "The NUESA Library Document"): Uint8Array {
+  const cleanTitle = title.replace(/[()\\]/g, " ").replace(/[^\x20-\x7E]/g, " ").slice(0, 72);
+  const streamBody = [
+    "BT",
+    "/F1 16 Tf",
+    "50 720 Td",
+    `(${cleanTitle}) Tj`,
+    "/F1 11 Tf",
+    "0 -30 Td",
+    "(The NUESA Library - Local Mock Storage Placeholder) Tj",
+    "0 -20 Td",
+    "(This file is not stored in local mock-r2 cache. If it was uploaded to Cloudflare R2,) Tj",
+    "0 -16 Td",
+    "(add R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY to your .env file.) Tj",
+    "ET",
+  ].join("\n");
   const pdfString = `%PDF-1.4
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
 endobj
 2 0 obj
-<< /Type /Pages /Kids [3 0 R] >>
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
 endobj
 3 0 obj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
 endobj
 4 0 obj
-<< /Length 220 >>
+<< /Length ${streamBody.length} >>
 stream
-BT
-/F1 18 Tf
-50 720 Td
-(${cleanTitle}) Tj
-/F1 12 Tf
-0 -30 Td
-(NUESApedia - Local Development Mock Storage) Tj
-0 -20 Td
-(This placeholder document was generated for local testing.) Tj
-ET
+${streamBody}
 endstream
 endobj
 5 0 obj
@@ -73,13 +78,13 @@ xref
 0000000000 65535 f 
 0000000009 00000 n 
 0000000058 00000 n 
-0000000105 00000 n 
-0000000234 00000 n 
-0000000506 00000 n 
+0000000115 00000 n 
+0000000244 00000 n 
+0000000600 00000 n 
 trailer
 << /Size 6 /Root 1 0 R >>
 startxref
-585
+670
 %%EOF
 `;
   return new TextEncoder().encode(pdfString);
@@ -123,16 +128,19 @@ class PersistentMockR2Store {
       console.warn("[mockR2Store] Failed to read from disk:", e);
     }
 
-    // In local development, if an existing resource key is requested but storage was cleared,
-    // synthesize a fallback valid document so the reader/download never breaks with a 404 JSON crash
+    // In local development, if an existing resource key is requested (e.g. a row synced from
+    // shared PostgreSQL whose binary lives in Cloudflare R2) and local mock storage does not
+    // have the file, synthesize an ephemeral fallback PDF without poisoning disk cache.
     if (process.env.NODE_ENV !== "production") {
       const fileName = key.split("/").pop() || "document.pdf";
       const isPdf = fileName.toLowerCase().endsWith(".pdf");
       const title = fileName.replace(/\.[a-zA-Z0-9]+$/i, "").replace(/[_-]/g, " ");
       const bytes = isPdf
         ? createFallbackPdf(title)
-        : new TextEncoder().encode(`NUESApedia Local Dev Document: ${title}`);
-      const item: MockStoredPdf = {
+        : new TextEncoder().encode(
+            `The NUESA Library Local Dev Placeholder: ${title}\nConfigure Cloudflare R2 in .env to view real remote uploads.`
+          );
+      return {
         bytes,
         sizeBytes: bytes.byteLength,
         uploadedBy: "system-dev-fallback",
@@ -140,8 +148,6 @@ class PersistentMockR2Store {
         fileName,
         contentType: isPdf ? "application/pdf" : "text/plain",
       };
-      this.set(key, item);
-      return item;
     }
 
     return undefined;
@@ -155,10 +161,10 @@ class PersistentMockR2Store {
       const binPath = path.join(this.dir, `${hash}.bin`);
       const metaPath = path.join(this.dir, `${hash}.json`);
 
-      fs.writeFile(binPath, Buffer.from(item.bytes), (err) => {
-        if (err) console.warn("[mockR2Store] Failed to write binary file:", err);
-      });
-      fs.writeFile(
+      // Persist synchronously so an immediate `/api/uploads/:id/complete` call in another
+      // worker/module never races ahead of disk flush and misses the uploaded file.
+      fs.writeFileSync(binPath, Buffer.from(item.bytes));
+      fs.writeFileSync(
         metaPath,
         JSON.stringify({
           sizeBytes: item.sizeBytes,
@@ -167,10 +173,7 @@ class PersistentMockR2Store {
           contentType: item.contentType,
           fileName: item.fileName,
         }),
-        "utf-8",
-        (err) => {
-          if (err) console.warn("[mockR2Store] Failed to write metadata file:", err);
-        }
+        "utf-8"
       );
     } catch (e) {
       console.warn("[mockR2Store] Failed to persist to disk:", e);

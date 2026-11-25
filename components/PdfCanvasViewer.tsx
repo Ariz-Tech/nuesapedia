@@ -21,19 +21,23 @@ import {
   X,
   AlertCircle,
 } from "lucide-react";
+import type { PdfPageText } from "@/lib/ai-context";
 
 interface PdfCanvasViewerProps {
   src: string;
   title: string;
   initialPage?: number;
+  targetPage?: { page: number; nonce: number } | null;
   onPageChange?: (page: number, totalPages: number) => void;
+  onTextExtractorReady?: (extractor: (() => Promise<PdfPageText[]>) | null) => void;
   compact?: boolean;
 }
 
 type PdfDocumentProxy = {
   numPages: number;
   getPage: (pageNum: number) => Promise<PdfPageProxy>;
-  destroy: () => Promise<void> | void;
+  cleanup?: (keepLoadedFonts?: boolean) => Promise<void> | void;
+  destroy?: () => Promise<void> | void;
 };
 
 type PdfPageProxy = {
@@ -50,7 +54,9 @@ export default function PdfCanvasViewer({
   src,
   title,
   initialPage = 1,
+  targetPage = null,
   onPageChange,
+  onTextExtractorReady,
   compact = false,
 }: PdfCanvasViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -59,10 +65,21 @@ export default function PdfCanvasViewer({
   const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
   const touchStartXRef = useRef<number | null>(null);
   const onPageChangeRef = useRef(onPageChange);
+  const onTextExtractorReadyRef = useRef(onTextExtractorReady);
+  const initialPageRef = useRef(initialPage);
 
   const [numPages, setNumPages] = useState(0);
   const [pageNumber, setPageNumber] = useState(Math.max(1, initialPage));
   const [pageInput, setPageInput] = useState(String(Math.max(1, initialPage)));
+  const [lastTargetNonce, setLastTargetNonce] = useState<number | null>(null);
+
+  // Sync page when parent requests a jump (e.g. clicking [Page N] in AI Study Companion)
+  if (targetPage && numPages > 0 && targetPage.nonce !== lastTargetNonce) {
+    const clamped = Math.min(Math.max(1, targetPage.page), numPages);
+    setLastTargetNonce(targetPage.nonce);
+    setPageNumber(clamped);
+    setPageInput(String(clamped));
+  }
   const [zoomScale, setZoomScale] = useState<number>(1);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [loadingDoc, setLoadingDoc] = useState(true);
@@ -80,6 +97,14 @@ export default function PdfCanvasViewer({
   useEffect(() => {
     onPageChangeRef.current = onPageChange;
   }, [onPageChange]);
+
+  useEffect(() => {
+    onTextExtractorReadyRef.current = onTextExtractorReady;
+  }, [onTextExtractorReady]);
+
+  useEffect(() => {
+    initialPageRef.current = initialPage;
+  }, [initialPage]);
 
   // Keep container width responsive for mobile/desktop fit-to-width rendering
   useEffect(() => {
@@ -113,26 +138,79 @@ export default function PdfCanvasViewer({
         const pdfjs = await import("pdfjs-dist");
         pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
-        // Fetch bytes first when loading from same-origin or blob URLs to avoid partial-range quirks
+        // Resolve same-origin `/api/resources/:id/view` into its direct signed R2 URL first so
+        // cross-origin redirects to R2 never fail CORS when `withCredentials: true` meets `ACAO: *`.
+        let resolvedUrl = src;
+        if (src.startsWith("/api/resources/") && src.includes("/view")) {
+          const sep = src.includes("?") ? "&" : "?";
+          const metaRes = await fetch(`${src}${sep}format=json`, {
+            credentials: "same-origin",
+            cache: "no-store",
+          });
+          if (metaRes.ok) {
+            const metaJson = (await metaRes.json().catch(() => null)) as {
+              success?: boolean;
+              viewUrl?: string;
+            } | null;
+            if (metaJson?.success && typeof metaJson.viewUrl === "string" && metaJson.viewUrl) {
+              resolvedUrl = metaJson.viewUrl;
+            }
+          }
+        }
+
+        const isSameOriginUrl =
+          resolvedUrl.startsWith("/") || resolvedUrl.startsWith("blob:");
+
         loadingTask = pdfjs.getDocument({
-          url: src,
-          withCredentials: src.startsWith("/"),
+          url: resolvedUrl,
+          withCredentials: isSameOriginUrl,
         }) as unknown as { promise: Promise<PdfDocumentProxy>; destroy?: () => Promise<void> };
 
         const doc = await loadingTask.promise;
         if (cancelled) {
-          void doc.destroy();
+          if (typeof doc.destroy === "function") {
+            void Promise.resolve(doc.destroy()).catch(() => {});
+          } else if (typeof loadingTask.destroy === "function") {
+            void Promise.resolve(loadingTask.destroy()).catch(() => {});
+          }
           return;
         }
 
         pdfDocRef.current = doc;
         setNumPages(doc.numPages);
-        const clampedInitial = Math.min(Math.max(1, initialPage), doc.numPages);
+        const clampedInitial = Math.min(Math.max(1, initialPageRef.current), doc.numPages);
         setPageNumber(clampedInitial);
         setPageInput(String(clampedInitial));
+
+        // Expose lazy, cached page-text extractor for the AI Study Companion (zero upfront cost)
+        let cachedPagesPromise: Promise<PdfPageText[]> | null = null;
+        onTextExtractorReadyRef.current?.(() => {
+          if (cachedPagesPromise) return cachedPagesPromise;
+          cachedPagesPromise = (async () => {
+            const extracted: PdfPageText[] = [];
+            const maxPages = Math.min(doc.numPages, 120);
+            for (let i = 1; i <= maxPages; i += 1) {
+              try {
+                const p = await doc.getPage(i);
+                const content = await p.getTextContent();
+                const text = content.items
+                  .map((it) => it.str || "")
+                  .join(" ")
+                  .replace(/\s+/g, " ")
+                  .trim();
+                extracted.push({ page: i, text });
+              } catch {
+                extracted.push({ page: i, text: "" });
+              }
+            }
+            return extracted;
+          })();
+          return cachedPagesPromise;
+        });
       } catch (err) {
         if (!cancelled) {
           console.warn("[PdfCanvasViewer] Falling back to native PDF frame:", err);
+          onTextExtractorReadyRef.current?.(null);
           setFallbackToIframe(true);
         }
       } finally {
@@ -144,6 +222,7 @@ export default function PdfCanvasViewer({
 
     return () => {
       cancelled = true;
+      onTextExtractorReadyRef.current?.(null);
       if (renderTaskRef.current) {
         try {
           renderTaskRef.current.cancel();
@@ -152,14 +231,21 @@ export default function PdfCanvasViewer({
         }
         renderTaskRef.current = null;
       }
-      if (pdfDocRef.current) {
-        void pdfDocRef.current.destroy();
-        pdfDocRef.current = null;
-      } else if (loadingTask?.destroy) {
-        void loadingTask.destroy();
+      const activeDoc = pdfDocRef.current;
+      pdfDocRef.current = null;
+      try {
+        if (loadingTask && typeof loadingTask.destroy === "function") {
+          void Promise.resolve(loadingTask.destroy()).catch(() => {});
+        } else if (activeDoc && typeof activeDoc.destroy === "function") {
+          void Promise.resolve(activeDoc.destroy()).catch(() => {});
+        } else if (activeDoc && typeof activeDoc.cleanup === "function") {
+          void Promise.resolve(activeDoc.cleanup()).catch(() => {});
+        }
+      } catch {
+        // Ignore teardown errors when switching documents
       }
     };
-  }, [src, initialPage]);
+  }, [src]);
 
   // Render active page onto HiDPI canvas whenever page, zoom, or container width changes
   useEffect(() => {

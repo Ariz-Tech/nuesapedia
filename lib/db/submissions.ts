@@ -56,9 +56,24 @@ export function mapSubmissionRow(row: Record<string, unknown>): DbSubmission {
       ? Number(bytesVal)
       : null;
 
+  const submitterName = row.submitter_name ? String(row.submitter_name) : undefined;
+  const submitterEmail = row.submitter_email ? String(row.submitter_email) : undefined;
+  const submittedBy =
+    submitterName && submitterEmail
+      ? {
+          id: String(row.user_id ?? row.userId ?? ""),
+          name: submitterName,
+          email: submitterEmail,
+          department: row.submitter_department ? String(row.submitter_department) : "",
+          level: row.submitter_level ? String(row.submitter_level) : "",
+          avatar: row.submitter_avatar ? String(row.submitter_avatar) : undefined,
+        }
+      : undefined;
+
   return {
     id,
     userId: String(row.user_id ?? row.userId ?? ""),
+    ...(submittedBy ? { submittedBy } : {}),
     title: String(row.title ?? ""),
     courseCode: String(row.course_code ?? row.courseCode ?? ""),
     department: String(row.department ?? ""),
@@ -541,27 +556,60 @@ export async function getAllSubmissions(
   const offset = Math.max(0, options?.offset ?? 0);
 
   if (isDevMemoryMode()) {
+    const usersById = new Map<string, { id: string; name: string; email: string; department: string; level: string; avatar: string }>();
+    for (const u of devStore.users.values()) {
+      usersById.set(u.id, u);
+    }
     const filtered =
       status && status !== "ALL"
         ? devStore.submissions.filter((s) => s.status === status)
         : devStore.submissions.filter((s) => s.status !== "UPLOADING");
-    return filtered.slice(offset, offset + limit);
+    return filtered.slice(offset, offset + limit).map((s) => {
+      const contributor = usersById.get(s.userId);
+      return contributor
+        ? {
+            ...s,
+            submittedBy: {
+              id: contributor.id,
+              name: contributor.name,
+              email: contributor.email,
+              department: contributor.department,
+              level: contributor.level,
+              avatar: contributor.avatar,
+            },
+          }
+        : s;
+    });
   }
 
   const db = await getReadyDb();
   const res =
     status && status !== "ALL"
       ? await db.query(
-          `SELECT * FROM submissions
-           WHERE status = $1
-           ORDER BY created_at DESC
+          `SELECT s.*,
+                  u.name AS submitter_name,
+                  u.email AS submitter_email,
+                  u.department AS submitter_department,
+                  u.level AS submitter_level,
+                  u.avatar AS submitter_avatar
+           FROM submissions s
+           LEFT JOIN users u ON u.id = s.user_id
+           WHERE s.status = $1
+           ORDER BY s.created_at DESC
            LIMIT $2 OFFSET $3`,
           [status, limit, offset]
         )
       : await db.query(
-          `SELECT * FROM submissions
-           WHERE status <> 'UPLOADING'
-           ORDER BY created_at DESC
+          `SELECT s.*,
+                  u.name AS submitter_name,
+                  u.email AS submitter_email,
+                  u.department AS submitter_department,
+                  u.level AS submitter_level,
+                  u.avatar AS submitter_avatar
+           FROM submissions s
+           LEFT JOIN users u ON u.id = s.user_id
+           WHERE s.status <> 'UPLOADING'
+           ORDER BY s.created_at DESC
            LIMIT $1 OFFSET $2`,
           [limit, offset]
         );

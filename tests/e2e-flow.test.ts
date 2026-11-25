@@ -113,6 +113,16 @@ test("Full-stack HTTP E2E flow: signup, upload, deduplication, moderation, catal
     const notFoundHtml = await notFoundRes.text();
     assert.match(notFoundHtml, /404/i);
 
+    // 1b. AI Study Companion endpoint enforces signed-in students only (401 for guests)
+    const guestAiRes = await fetch(`${baseUrl}/api/ai/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resourceId: "any_id", message: "Summarize this PDF" }),
+    });
+    assert.equal(guestAiRes.status, 401);
+    const guestAiJson = await guestAiRes.json();
+    assert.equal(guestAiJson.error?.code, "UNAUTHORIZED");
+
     // 2. If DATABASE_URL is absent in production mode, auth/DB routes require Postgres; skip stateful DB steps cleanly.
     const healthRes = await fetch(`${baseUrl}/api/health`);
     const healthJson = await healthRes.json();

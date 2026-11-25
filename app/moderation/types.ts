@@ -8,9 +8,19 @@ export interface UserProfile {
   avatar: string;
 }
 
+export interface SubmissionContributor {
+  id: string;
+  name: string;
+  email: string;
+  department: string;
+  level: string;
+  avatar?: string;
+}
+
 export interface SubmissionItem {
   id: string;
   userId: string;
+  submittedBy?: SubmissionContributor;
   title: string;
   courseCode: string;
   department: string;

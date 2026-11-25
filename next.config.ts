@@ -25,15 +25,26 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     const isDev = process.env.NODE_ENV !== "production";
+    let r2PublicOrigin = "";
+    const rawR2Public = process.env.R2_PUBLIC_URL?.trim();
+    if (rawR2Public && /^https?:\/\//i.test(rawR2Public)) {
+      try {
+        r2PublicOrigin = ` ${new URL(rawR2Public).origin}`;
+      } catch {
+        r2PublicOrigin = "";
+      }
+    }
+    const r2Origins = `https://*.r2.cloudflarestorage.com https://*.r2.dev${r2PublicOrigin}`;
+
     const cspDirectives = [
       "default-src 'self'",
       `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https://img.youtube.com https://api.dicebear.com https://res.cloudinary.com https://images.unsplash.com",
+      `img-src 'self' data: blob: https://img.youtube.com https://api.dicebear.com https://res.cloudinary.com https://images.unsplash.com${r2PublicOrigin}`,
       "font-src 'self' data:",
       "worker-src 'self' blob:",
-      "frame-src 'self' blob: https://www.youtube.com",
-      "connect-src 'self' blob: data: https://api.dicebear.com https://*.r2.cloudflarestorage.com https://*.r2.dev",
+      `frame-src 'self' blob: https://www.youtube.com ${r2Origins}`,
+      `connect-src 'self' blob: data: https://api.dicebear.com ${r2Origins}`,
       "object-src 'none'",
       "base-uri 'self'",
       "form-action 'self'",

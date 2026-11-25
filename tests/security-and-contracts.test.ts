@@ -784,5 +784,113 @@ test("SEO robots and sitemap routes expose public catalog and protect private pa
   assert.ok(entries.some((e) => e.url.endsWith("/resources")));
 });
 
+test("AI Study Companion context selection bounds large PDFs, prioritizes current page, and flags scanned docs", async () => {
+  const { selectRelevantDocumentContext } = await import("@/lib/ai-context");
+  const { buildStudySystemPrompt, getConfiguredAiModel } = await import("@/lib/ai");
+
+  // 1. Scanned / empty PDF detection
+  const scanned = selectRelevantDocumentContext(
+    [
+      { page: 1, text: "   " },
+      { page: 2, text: "12" },
+    ],
+    "Summarize this PDF",
+    "summarize",
+    1
+  );
+  assert.equal(scanned.isScannedOrEmpty, true);
+  assert.equal(scanned.text, "");
+
+  // 2. Small PDF passes through intact with page labels
+  const small = selectRelevantDocumentContext(
+    [
+      { page: 1, text: "Thermodynamics first law: delta U equals Q minus W for closed systems." },
+      { page: 2, text: "Second law of thermodynamics and Carnot efficiency eta = 1 - Tc/Th." },
+    ],
+    "Explain Carnot efficiency",
+    "chat",
+    1
+  );
+  assert.equal(small.isScannedOrEmpty, false);
+  assert.equal(small.truncated, false);
+  assert.deepEqual(small.includedPages, [1, 2]);
+  assert.match(small.text, /\[Page 2\]/);
+
+  // 3. Large textbook respects maxChars cap, prioritizes currentPage ± 2 & keyword match
+  const bigPages = Array.from({ length: 40 }, (_, i) => ({
+    page: i + 1,
+    text:
+      i + 1 === 27
+        ? "Bernoulli equation derivation for inviscid steady incompressible flow along a streamline. ".repeat(15)
+        : `General chapter ${i + 1} engineering notes and worked examples. `.repeat(25),
+  }));
+  const bounded = selectRelevantDocumentContext(
+    bigPages,
+    "Explain Bernoulli equation derivation",
+    "chat",
+    10,
+    4000
+  );
+  assert.equal(bounded.truncated, true);
+  assert.ok(bounded.text.length <= 4000);
+  assert.ok(bounded.includedPages.includes(10), "Must include current reading page");
+  assert.ok(bounded.includedPages.includes(27), "Must include keyword-matched page");
+
+  // 4. Prompt builder includes security delimiters, citation format, and mode instructions
+  const prompt = buildStudySystemPrompt({
+    title: "Thermodynamics Complete Slides",
+    courseCode: "MEE 301",
+    department: "Mechanical Engineering",
+    level: "300L",
+    type: "Lecture Note",
+    currentPage: 4,
+    totalPages: 24,
+    documentContext: small.text,
+    mode: "quiz",
+  });
+  assert.match(prompt, /<document_context>/);
+  assert.match(prompt, /\[Page N\]/);
+  assert.match(prompt, /5-question multiple-choice practice quiz/i);
+  assert.ok(getConfiguredAiModel().length > 0);
+});
+
+test("Moderation queue hydrates contributor identity while public resource projection strips it", async () => {
+  const { getAllSubmissions } = await import("@/lib/db/submissions");
+  const { toPublicResource } = await import("@/lib/db/types");
+
+  const contributor = await createUser({
+    name: "Kemi Contributor",
+    email: `kemi_${Date.now()}@fuoye.edu.ng`,
+    password: await hashPassword("StrongPass2026"),
+    department: "Civil Engineering",
+    level: "400L",
+    avatar: "https://api.dicebear.com/7.x/lorelei/svg?seed=Kemi",
+  });
+
+  const sub = await createSubmission({
+    id: `sub_contrib_${Date.now()}`,
+    userId: contributor.id,
+    title: "Geotechnical Lab Sheet",
+    courseCode: "CVE 403",
+    department: "Civil Engineering",
+    level: "400L",
+    semester: "First Semester",
+    type: "Lecture Note",
+    medium: "PDF",
+    status: "PENDING_REVIEW",
+  });
+
+  const modQueue = await getAllSubmissions("PENDING_REVIEW", { limit: 100 });
+  const match = modQueue.find((s) => s.id === sub.id);
+  assert.ok(match);
+  assert.equal(match.submittedBy?.name, "Kemi Contributor");
+  assert.equal(match.submittedBy?.email, contributor.email);
+
+  // Public catalog projection must never expose contributor PII
+  const publicProj = toPublicResource(match) as unknown as Record<string, unknown>;
+  assert.equal("submittedBy" in publicProj, false);
+  assert.equal("userId" in publicProj, false);
+});
+
 
 
