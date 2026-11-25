@@ -29,6 +29,7 @@ import {
   READING_PROGRESS_EVENT,
 } from "@/lib/offline-vault";
 import { useAuth } from "@/context/AuthContext";
+import { preloadPdfViewerChunks } from "@/components/PdfViewerLoader";
 
 interface SavedResourcesContextValue {
   savedItems: CourseMaterialItem[];
@@ -202,6 +203,16 @@ export function SavedResourcesProvider({ children }: { children: ReactNode }) {
     [offlineDocs]
   );
 
+  // If the student already has downloaded offline PDFs and is currently online,
+  // warm-cache the PDF viewer chunks during idle time so future offline reading works smoothly.
+  useEffect(() => {
+    if (isOffline || offlineDocs.length === 0) return;
+    const timer = window.setTimeout(() => {
+      preloadPdfViewerChunks();
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [isOffline, offlineDocs.length]);
+
   const isSaved = useCallback((id: string) => savedIds.has(id), [savedIds]);
 
   const isOfflineAvailable = useCallback(
@@ -242,6 +253,9 @@ export function SavedResourcesProvider({ children }: { children: ReactNode }) {
       });
 
       try {
+        // Warm-cache the lazy PDF viewer & pdfjs-dist chunks while online so reading
+        // this downloaded PDF offline never hits a ChunkLoadError.
+        preloadPdfViewerChunks();
         // `saveOfflineDocument` dispatches OFFLINE_VAULT_EVENT automatically on new writes,
         // avoiding redundant double IndexedDB reads.
         return await downloadAndCacheMaterial(item, options);

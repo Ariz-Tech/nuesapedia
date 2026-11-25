@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import dynamic from "next/dynamic";
 import {
   X,
   Bookmark,
@@ -36,16 +35,7 @@ import { extractApiError } from "@/lib/api-helpers";
 import { getFileFormatDisplay } from "@/lib/file-utils";
 import { useTrackedBlobUrl } from "@/lib/hooks/useTrackedBlobUrl";
 import DocumentFallbackPreview from "@/components/DocumentFallbackPreview";
-
-const PdfCanvasViewer = dynamic(() => import("@/components/PdfCanvasViewer"), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-full flex flex-col items-center justify-center p-8 text-slate-500">
-      <Loader2 className="w-7 h-7 text-[#00875A] animate-spin mb-2" />
-      <p className="text-xs font-medium">Loading PDF reader...</p>
-    </div>
-  ),
-});
+import PdfViewerLoader from "@/components/PdfViewerLoader";
 
 interface ResourceViewerModalProps {
   material: CourseMaterialItem | null;
@@ -628,7 +618,7 @@ function ResourceViewerModalOpen({
                   compact
                 />
               ) : pdfSrc ? (
-                <PdfCanvasViewer
+                <PdfViewerLoader
                   src={pdfSrc}
                   title={material.title}
                   initialPage={currentPage}

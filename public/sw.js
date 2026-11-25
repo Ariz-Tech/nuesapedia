@@ -1,6 +1,6 @@
-// The NUESA Library Service Worker v8 — Offline App Shell + Bounded Catalog Cache (Zero Shared-PC Session Leaks)
-const SHELL_CACHE = "nuesapedia-shell-v8";
-const DATA_CACHE = "nuesapedia-public-data-v8";
+// The NUESA Library Service Worker v9 — Offline App Shell + Bounded Catalog Cache (Zero Shared-PC Session Leaks)
+const SHELL_CACHE = "nuesapedia-shell-v9";
+const DATA_CACHE = "nuesapedia-public-data-v9";
 const MAX_DATA_CACHE_ENTRIES = 40;
 
 // Strictly static / cookie-free shells (no server-rendered user PII).
@@ -54,16 +54,31 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(SHELL_CACHE)
-      .then((cache) =>
-        Promise.allSettled(
-          STATIC_ASSETS.map((url) =>
+      .then(async (cache) => {
+        const discoveredChunks = new Set();
+        await Promise.allSettled(
+          STATIC_ASSETS.map(async (url) => {
             // Fetch shells with credentials omitted so no session cookie ever contaminates SHELL_CACHE
-            fetch(url, { cache: "reload", credentials: "omit" }).then((res) => {
-              if (res.ok) return cache.put(url, res);
+            const res = await fetch(url, { cache: "reload", credentials: "omit" });
+            if (!res.ok) return;
+            await cache.put(url, res.clone());
+            const ct = res.headers.get("content-type") || "";
+            if (ct.includes("text/html")) {
+              const html = await res.text();
+              const matches = html.match(/\/_next\/static\/[^"'\\\s<>)]+\.(?:js|css|woff2)/g) || [];
+              for (const asset of matches) discoveredChunks.add(asset);
+            }
+          })
+        );
+        if (discoveredChunks.size > 0) {
+          await Promise.allSettled(
+            Array.from(discoveredChunks).map(async (chunkUrl) => {
+              const res = await fetch(chunkUrl, { credentials: "omit" });
+              if (res.ok) await cache.put(chunkUrl, res);
             })
-          )
-        )
-      )
+          );
+        }
+      })
       .then(() => self.skipWaiting())
   );
 });
@@ -176,7 +191,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static Next.js assets & PDF.js worker: Cache-first
+  // Static Next.js assets & PDF.js worker: Cache-first (never throw unhandled rejections offline)
   if (
     url.pathname.startsWith("/_next/static/") ||
     url.pathname === "/pdf.worker.min.mjs" ||
@@ -188,13 +203,21 @@ self.addEventListener("fetch", (event) => {
       caches.match(request).then(
         (cached) =>
           cached ||
-          fetch(request).then((res) => {
-            if (res.ok) {
-              const clone = res.clone();
-              caches.open(SHELL_CACHE).then((cache) => cache.put(request, clone));
-            }
-            return res;
-          })
+          fetch(request)
+            .then((res) => {
+              if (res.ok) {
+                const clone = res.clone();
+                caches.open(SHELL_CACHE).then((cache) => cache.put(request, clone));
+              }
+              return res;
+            })
+            .catch(
+              () =>
+                new Response("", {
+                  status: 503,
+                  statusText: "Offline",
+                })
+            )
       )
     );
     return;

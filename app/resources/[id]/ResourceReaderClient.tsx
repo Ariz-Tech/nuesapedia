@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import dynamic from "next/dynamic";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { resolveCourseMetadata } from "@/lib/courses";
@@ -46,17 +45,8 @@ import {
 import { getFileFormatDisplay } from "@/lib/file-utils";
 import DocumentFallbackPreview from "@/components/DocumentFallbackPreview";
 import AiStudyCompanion from "@/components/AiStudyCompanion";
+import PdfViewerLoader from "@/components/PdfViewerLoader";
 import type { PdfPageText } from "@/lib/ai-context";
-
-const PdfCanvasViewer = dynamic(() => import("@/components/PdfCanvasViewer"), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-full flex flex-col items-center justify-center p-8 text-slate-500">
-      <Loader2 className="w-7 h-7 text-[#00875A] animate-spin mb-2" />
-      <p className="text-xs font-medium">Loading mobile-ready PDF reader...</p>
-    </div>
-  ),
-});
 
 const REPORT_REASONS = [
   "Corrupted or unreadable document",
@@ -712,7 +702,7 @@ export default function ResourceReaderClient({
                       onDownload={() => downloadMaterial(resource, { saveToDevice: true })}
                     />
                   ) : pdfSrc ? (
-                    <PdfCanvasViewer
+                    <PdfViewerLoader
                       src={pdfSrc}
                       title={resource.title}
                       initialPage={currentPage}
